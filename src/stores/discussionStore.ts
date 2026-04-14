@@ -7,7 +7,7 @@ interface DiscussionState {
   currentDiscussion: Discussion | null;
   messages: Message[];
   loading: boolean;
-  fetchDiscussions: (bridgeId?: string) => Promise<void>;
+  fetchDiscussions: (bridgeId?: string, eventId?: string) => Promise<void>;
   fetchDiscussion: (id: string) => Promise<void>;
   fetchMessages: (discussionId: string) => Promise<void>;
   createDiscussion: (discussion: Partial<Discussion>) => Promise<{ id?: string; error: string | null }>;
@@ -21,7 +21,7 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
   messages: [],
   loading: false,
 
-  fetchDiscussions: async (bridgeId) => {
+  fetchDiscussions: async (bridgeId, eventId?) => {
     set({ loading: true });
     try {
       let query = supabase
@@ -30,6 +30,7 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
         .order('last_message_at', { ascending: false });
 
       if (bridgeId) query = query.eq('bridge_id', bridgeId);
+      if (eventId) query = query.eq('event_id', eventId);
 
       const { data } = await query;
       if (data && data.length > 0) {
@@ -37,7 +38,7 @@ export const useDiscussionStore = create<DiscussionState>((set, get) => ({
         return;
       }
     } catch (e) {}
-    set({ loading: false });
+    set({ discussions: [], loading: false });
   },
 
   fetchDiscussion: async (id) => {

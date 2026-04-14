@@ -7,6 +7,7 @@ export interface User {
   interests: string[];
   invite_token: string | null;
   role: 'student' | 'admin' | 'moderator';
+  user_type: 'student' | 'family_member';
   created_at: string;
 }
 
@@ -23,6 +24,18 @@ export interface BridgeImage {
   image_uri: string;
   display_order: number;
   created_at: string;
+}
+
+export interface BridgeFile {
+  id: string;
+  bridge_id: string;
+  file_name: string;
+  file_uri: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by: string;
+  created_at: string;
+  uploader?: User;
 }
 
 export interface BridgeTip {
@@ -74,6 +87,7 @@ export interface Bridge {
   rating_avg: number;
   status: 'active' | 'archived' | 'pending';
   created_at: string;
+  updated_at?: string;
   children?: Bridge[];
   creator?: User;
   tags?: BridgeTag[];
@@ -85,11 +99,13 @@ export interface Discussion {
   id: string;
   title: string;
   bridge_id: string;
+  event_id?: string | null;
   tag: string;
   created_by: string;
   participants_count: number;
   last_message_at: string;
   bridge?: Bridge;
+  event?: Event;
   creator?: User;
 }
 
@@ -108,9 +124,22 @@ export interface Event {
   description: string;
   bridge_id: string | null;
   date: string;
+  location?: string;
+  category?: string;
+  link?: string;
+  image_url?: string | null;
   created_by: string;
+  created_at?: string;
   bridge?: Bridge;
   creator?: User;
+}
+
+export interface EventRsvp {
+  user_id: string;
+  event_id: string;
+  status: 'going' | 'maybe' | 'not_going';
+  created_at: string;
+  user?: User;
 }
 
 export interface Apartment {
@@ -185,4 +214,28 @@ export interface MeditMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+}
+
+export interface SecondhandListing {
+  id: string;
+  title: string;
+  description: string;
+  category: 'product' | 'service' | 'other';
+  price: number | null;
+  images: string[];
+  contact_info: string;
+  created_by: string;
+  status: 'active' | 'sold' | 'closed';
+  created_at: string;
+  creator?: User;
+}
+
+export interface Friendship {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+  requester?: User;
+  addressee?: User;
 }

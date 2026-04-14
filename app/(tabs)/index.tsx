@@ -18,7 +18,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { useBridgeStore } from '../../src/stores/bridgeStore';
 
 const QUICK_ACTIONS = [
-  { icon: 'chatbubble-ellipses', label: 'MEDIT', route: '/(tabs)/chat', color: '#2d5a3d' },
+  { icon: 'chatbubble-ellipses', label: 'CHATMED', route: '/(tabs)/chat', color: '#2d5a3d' },
   { icon: 'chatbubbles', label: 'דיונים', route: '/(tabs)/discussions/', color: '#4A90D9' },
   { icon: 'calendar', label: 'אירועים', route: '/(tabs)/events/', color: '#F4C542' },
   { icon: 'home-outline', label: 'דירות', route: '/(tabs)/apartments/', color: '#E8734A' },
@@ -68,7 +68,7 @@ export default function HomeScreen() {
             <Ionicons name="chatbubble-ellipses" size={28} color={COLORS.white} />
           </View>
           <View style={styles.meditInfo}>
-            <Text style={styles.meditTitle}>שאל את MEDIT</Text>
+            <Text style={styles.meditTitle}>שאל את CHATMED</Text>
             <Text style={styles.meditDesc}>העוזר החכם שלך – שאל כל שאלה על MEDNET</Text>
           </View>
           <Ionicons name="chevron-back" size={22} color={COLORS.white} />
@@ -104,7 +104,7 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>גשרים מובילים</Text>
         </View>
         {bridges.slice(0, 4).map((bridge) => (
-          <BridgeCard key={bridge.id} bridge={bridge} variant="large" />
+          <BridgeCard key={bridge.id} bridge={bridge} variant="large" currentUserId={user?.id} />
         ))}
 
         {/* Community Questions CTA */}

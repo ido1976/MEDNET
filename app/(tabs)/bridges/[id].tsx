@@ -12,9 +12,11 @@ import {
   FlatList,
   Dimensions,
   Alert,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 import ScreenWrapper from '../../../src/components/ScreenWrapper';
 import BridgeCard from '../../../src/components/BridgeCard';
 import StarRating from '../../../src/components/StarRating';
@@ -38,11 +40,12 @@ export default function BridgeDetailScreen() {
   const router = useRouter();
   const {
     currentBridge, fetchBridge, fetchSubBridges, rateBridge,
-    allTags, fetchAllTags, createTag, updateBridge,
+    allTags, fetchAllTags, createTag, updateBridge, deleteBridge,
     tips, fetchTips, addTip, toggleTipLike,
     additions, fetchAdditions, pendingAdditions, fetchPendingAdditions,
     suggestAddition, reviewAddition,
-    createBridge,
+    files, fetchFiles, addFile, removeFile,
+    createBridge, generateBridgeContent,
   } = useBridgeStore();
   const { discussions, fetchDiscussions } = useDiscussionStore();
   const { user, session } = useAuthStore();
@@ -58,6 +61,10 @@ export default function BridgeDetailScreen() {
   const [editTagIds, setEditTagIds] = useState<string[]>([]);
   const [editImages, setEditImages] = useState<string[]>([]);
   const [showEditTagModal, setShowEditTagModal] = useState(false);
+  // AI writing mode in edit
+  const [editWriteMode, setEditWriteMode] = useState<'manual' | 'ai'>('manual');
+  const [editAiPrompt, setEditAiPrompt] = useState('');
+  const [editAiLoading, setEditAiLoading] = useState(false);
 
   // Tips state
   const [newTip, setNewTip] = useState('');
@@ -74,6 +81,9 @@ export default function BridgeDetailScreen() {
 
   // Image carousel
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  // File upload
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const isCreator = user?.id === currentBridge?.created_by;
 
@@ -93,6 +103,7 @@ export default function BridgeDetailScreen() {
       fetchTips(id),
       fetchAdditions(id),
       fetchAllTags(),
+      fetchFiles(id),
     ]);
     // Fetch pending additions if user is creator (will be checked after bridge loads)
     setLoading(false);
@@ -166,6 +177,24 @@ export default function BridgeDetailScreen() {
     setEditTagIds(prev => prev.includes(tagId) ? prev.filter(i => i !== tagId) : [...prev, tagId]);
   };
 
+  const handleEditAiGenerate = async () => {
+    if (!editAiPrompt.trim()) {
+      Alert.alert('שגיאה', 'נא להזין הנחיה ל-AI');
+      return;
+    }
+    setEditAiLoading(true);
+    const prompt = `ערוך או כתוב מחדש תיאור לגשר "${editName || 'ללא שם'}" עבור קהילת סטודנטים לרפואה. התיאור הנוכחי: "${editDesc}". ההנחיה מהמשתמש: ${editAiPrompt}`;
+    const result = await generateBridgeContent(prompt);
+    setEditAiLoading(false);
+    if (result.error) {
+      Alert.alert('שגיאה', result.error);
+      return;
+    }
+    if (result.content) {
+      setEditDesc(result.content);
+    }
+  };
+
   // Tip handlers
   const handleAddTip = async () => {
     if (!newTip.trim() || !user || !id) return;
@@ -205,6 +234,71 @@ export default function BridgeDetailScreen() {
     setSubName('');
     setSubDesc('');
     loadSubBridges();
+  };
+
+  // File handlers
+  const handlePickFile = async () => {
+    if (!user || !id) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ multiple: false });
+      if (result.canceled || !result.assets?.[0]) return;
+      const file = result.assets[0];
+      setUploadingFile(true);
+      const res = await addFile(id, user.id, {
+        name: file.name,
+        uri: file.uri,
+        type: file.mimeType || '',
+        size: file.size || 0,
+      });
+      setUploadingFile(false);
+      if (res.error) Alert.alert('שגיאה', res.error);
+    } catch {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleRemoveFile = (fileId: string) => {
+    if (!id) return;
+    Alert.alert('מחיקת קובץ', 'בטוח שברצונך למחוק את הקובץ?', [
+      { text: 'ביטול', style: 'cancel' },
+      { text: 'מחק', style: 'destructive', onPress: () => removeFile(fileId, id) },
+    ]);
+  };
+
+  // Delete bridge
+  const handleDeleteBridge = () => {
+    Alert.alert('מחיקת גשר', 'בטוח שברצונך למחוק את הגשר? פעולה זו לא ניתנת לביטול.', [
+      { text: 'ביטול', style: 'cancel' },
+      {
+        text: 'מחק', style: 'destructive', onPress: async () => {
+          if (!id) return;
+          const result = await deleteBridge(id);
+          if (result.error) {
+            Alert.alert('שגיאה', result.error);
+            return;
+          }
+          setShowEdit(false);
+          router.back();
+        },
+      },
+    ]);
+  };
+
+  const getFileIcon = (type: string): string => {
+    if (type.includes('pdf')) return 'document-text';
+    if (type.includes('image')) return 'image';
+    if (type.includes('video')) return 'videocam';
+    if (type.includes('audio')) return 'musical-notes';
+    if (type.includes('spreadsheet') || type.includes('excel')) return 'grid';
+    if (type.includes('presentation') || type.includes('powerpoint')) return 'easel';
+    if (type.includes('word') || type.includes('document')) return 'document';
+    return 'attach';
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   if (loading) {
@@ -270,6 +364,26 @@ export default function BridgeDetailScreen() {
           <Text style={styles.bridgeName}>{currentBridge?.name}</Text>
           <Text style={styles.bridgeDesc}>{currentBridge?.description}</Text>
 
+          {/* Creator and dates */}
+          <View style={styles.bridgeMetaSection}>
+            {currentBridge?.creator?.full_name && (
+              <View style={styles.bridgeMetaItem}>
+                <Ionicons name="person-outline" size={14} color={COLORS.gray} />
+                <Text style={styles.bridgeMetaText}>מקים הגשר: {currentBridge.creator.full_name}</Text>
+              </View>
+            )}
+            <View style={styles.bridgeMetaItem}>
+              <Ionicons name="calendar-outline" size={14} color={COLORS.gray} />
+              <Text style={styles.bridgeMetaText}>נוצר: {formatDate(currentBridge?.created_at || '')}</Text>
+            </View>
+            {currentBridge?.updated_at && (
+              <View style={styles.bridgeMetaItem}>
+                <Ionicons name="create-outline" size={14} color={COLORS.gray} />
+                <Text style={styles.bridgeMetaText}>עודכן: {formatDate(currentBridge.updated_at)}</Text>
+              </View>
+            )}
+          </View>
+
           {/* Tags */}
           {currentBridge?.tags && currentBridge.tags.length > 0 && (
             <View style={styles.tagsRow}>
@@ -315,12 +429,54 @@ export default function BridgeDetailScreen() {
           </View>
         )}
 
+        {/* Files */}
+        <View style={styles.sectionHeader}>
+          <TouchableOpacity onPress={handlePickFile} disabled={uploadingFile}>
+            {uploadingFile ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <Ionicons name="add-circle-outline" size={22} color={COLORS.primary} />
+            )}
+          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>קבצים</Text>
+        </View>
+        {files.length > 0 ? (
+          files.map((file) => (
+            <View key={file.id} style={styles.fileCard}>
+              <View style={styles.fileIconContainer}>
+                <Ionicons name={getFileIcon(file.file_type) as any} size={22} color={COLORS.primary} />
+              </View>
+              <View style={styles.fileInfo}>
+                <Text style={styles.fileName} numberOfLines={1}>{file.file_name}</Text>
+                <Text style={styles.fileMeta}>
+                  {formatFileSize(file.file_size)}
+                  {file.uploader?.full_name ? ` · ${file.uploader.full_name}` : ''}
+                </Text>
+              </View>
+              <View style={styles.fileActions}>
+                <TouchableOpacity onPress={() => Linking.openURL(file.file_uri)}>
+                  <Ionicons name="download-outline" size={20} color={COLORS.primary} />
+                </TouchableOpacity>
+                {(isCreator || user?.id === file.uploaded_by) && (
+                  <TouchableOpacity onPress={() => handleRemoveFile(file.id)}>
+                    <Ionicons name="trash-outline" size={20} color={COLORS.red} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptySection}>
+            <Text style={styles.emptyText}>אין קבצים עדיין</Text>
+          </View>
+        )}
+
         {/* Additions (approved) */}
         <View style={styles.sectionHeader}>
           <TouchableOpacity onPress={() => setShowAddition(true)}>
             <Ionicons name="add-circle-outline" size={22} color={COLORS.primary} />
           </TouchableOpacity>
-          <Text style={styles.sectionTitle}>תוספות</Text>
+          <Text style={styles.sectionTitle}>תוספות לגשר</Text>
         </View>
         {/* Pending additions (creator only) */}
         {isCreator && pendingAdditions.length > 0 && (
@@ -379,11 +535,16 @@ export default function BridgeDetailScreen() {
 
         {/* Discussions */}
         <View style={styles.sectionHeader}>
-          <TouchableOpacity
-            onPress={() => router.push(`/(tabs)/discussions/?bridgeId=${id}`)}
-          >
-            <Text style={styles.seeAll}>הצג הכל</Text>
-          </TouchableOpacity>
+          <View style={styles.sectionActions}>
+            <TouchableOpacity onPress={() => router.push(`/(tabs)/discussions/?bridgeId=${id}&openCreate=true`)}>
+              <Ionicons name="add-circle-outline" size={22} color={COLORS.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push(`/(tabs)/discussions/?bridgeId=${id}`)}
+            >
+              <Text style={styles.seeAll}>הצג הכל</Text>
+            </TouchableOpacity>
+          </View>
           <Text style={styles.sectionTitle}>דיונים</Text>
         </View>
         {discussions.length === 0 ? (
@@ -413,6 +574,16 @@ export default function BridgeDetailScreen() {
 
         {/* Events */}
         <View style={styles.sectionHeader}>
+          <View style={styles.sectionActions}>
+            <TouchableOpacity onPress={() => router.push(`/(tabs)/events/?bridgeId=${id}&openCreate=true`)}>
+              <Ionicons name="add-circle-outline" size={22} color={COLORS.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push(`/(tabs)/events/`)}
+            >
+              <Text style={styles.seeAll}>הצג הכל</Text>
+            </TouchableOpacity>
+          </View>
           <Text style={styles.sectionTitle}>אירועים</Text>
         </View>
         {events.length === 0 ? (
@@ -421,7 +592,11 @@ export default function BridgeDetailScreen() {
           </View>
         ) : (
           events.slice(0, 3).map((event) => (
-            <View key={event.id} style={styles.eventItem}>
+            <TouchableOpacity
+              key={event.id}
+              style={styles.eventItem}
+              onPress={() => router.push(`/(tabs)/events/${event.id}`)}
+            >
               <View style={styles.eventDate}>
                 <Text style={styles.eventDateText}>{formatDate(event.date)}</Text>
               </View>
@@ -431,7 +606,8 @@ export default function BridgeDetailScreen() {
                   {event.description}
                 </Text>
               </View>
-            </View>
+              <Ionicons name="chevron-back" size={18} color={COLORS.grayLight} />
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
@@ -448,7 +624,63 @@ export default function BridgeDetailScreen() {
               <View style={{ width: 24 }} />
             </View>
             <TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} textAlign="right" placeholder="שם הגשר" placeholderTextColor={COLORS.grayLight} />
-            <TextInput style={[styles.modalInput, { height: 80 }]} value={editDesc} onChangeText={setEditDesc} textAlign="right" multiline placeholder="תיאור" placeholderTextColor={COLORS.grayLight} />
+
+            {/* Writing mode toggle */}
+            <Text style={styles.modalLabel}>תיאור:</Text>
+            <View style={styles.writeModeRow}>
+              <TouchableOpacity
+                style={[styles.writeModeBtn, editWriteMode === 'manual' && styles.writeModeBtnActive]}
+                onPress={() => setEditWriteMode('manual')}
+              >
+                <Ionicons name="pencil" size={16} color={editWriteMode === 'manual' ? COLORS.white : COLORS.primaryDark} />
+                <Text style={[styles.writeModeText, editWriteMode === 'manual' && styles.writeModeTextActive]}>כתיבה ידנית</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.writeModeBtn, editWriteMode === 'ai' && styles.writeModeBtnActive]}
+                onPress={() => setEditWriteMode('ai')}
+              >
+                <Ionicons name="sparkles" size={16} color={editWriteMode === 'ai' ? COLORS.white : COLORS.primaryDark} />
+                <Text style={[styles.writeModeText, editWriteMode === 'ai' && styles.writeModeTextActive]}>עזרת AI</Text>
+              </TouchableOpacity>
+            </View>
+
+            {editWriteMode === 'ai' && (
+              <View style={styles.aiSection}>
+                <TextInput
+                  style={[styles.modalInput, { height: 60 }]}
+                  placeholder="תאר ל-AI מה לשנות או לכתוב..."
+                  placeholderTextColor={COLORS.grayLight}
+                  value={editAiPrompt}
+                  onChangeText={setEditAiPrompt}
+                  textAlign="right"
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[styles.aiGenerateBtn, editAiLoading && { opacity: 0.7 }]}
+                  onPress={handleEditAiGenerate}
+                  disabled={editAiLoading}
+                >
+                  {editAiLoading ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles" size={16} color={COLORS.white} />
+                      <Text style={styles.aiGenerateBtnText}>צור תוכן</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <TextInput
+              style={[styles.modalInput, { height: 100, textAlignVertical: 'top' }]}
+              value={editDesc}
+              onChangeText={setEditDesc}
+              textAlign="right"
+              multiline
+              placeholder={editWriteMode === 'ai' ? 'התוכן שנוצר יופיע כאן - ניתן לערוך' : 'תיאור'}
+              placeholderTextColor={COLORS.grayLight}
+            />
 
             <Text style={styles.modalLabel}>תגיות:</Text>
             <View style={styles.selectedTagsRow}>
@@ -469,6 +701,13 @@ export default function BridgeDetailScreen() {
             <TouchableOpacity style={styles.saveBtn} onPress={handleSaveEdit}>
               <Text style={styles.saveBtnText}>שמור שינויים</Text>
             </TouchableOpacity>
+
+            {isCreator && (
+              <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteBridge}>
+                <Ionicons name="trash-outline" size={18} color={COLORS.red} />
+                <Text style={styles.deleteBtnText}>מחק גשר</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </View>
       </Modal>
@@ -630,6 +869,24 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: SPACING.md,
   },
+  bridgeMetaSection: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: SPACING.md,
+    marginBottom: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.grayLight,
+  },
+  bridgeMetaItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+  },
+  bridgeMetaText: {
+    fontSize: 13,
+    color: COLORS.gray,
+  },
   tagsRow: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
@@ -638,12 +895,12 @@ const styles = StyleSheet.create({
   },
   tagChip: {
     backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: RADIUS.xl,
   },
   tagText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: COLORS.primary,
   },
@@ -688,6 +945,11 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
     marginTop: SPACING.xl,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
   },
   emptySection: {
     backgroundColor: COLORS.cardBg,
@@ -915,5 +1177,105 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary + '10',
     padding: SPACING.sm,
     borderRadius: RADIUS.sm,
+  },
+  // Files
+  fileCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
+    ...SHADOWS.card,
+  },
+  fileIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.primary + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fileInfo: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  fileName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+    marginBottom: 2,
+  },
+  fileMeta: {
+    fontSize: 12,
+    color: COLORS.gray,
+  },
+  fileActions: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  // AI writing mode
+  writeModeRow: {
+    flexDirection: 'row-reverse',
+    gap: SPACING.sm,
+  },
+  writeModeBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.grayLight,
+    backgroundColor: COLORS.cardBg,
+  },
+  writeModeBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  writeModeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+  },
+  writeModeTextActive: {
+    color: COLORS.white,
+  },
+  aiSection: {
+    gap: SPACING.sm,
+  },
+  aiGenerateBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accent,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+  },
+  aiGenerateBtnText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Delete bridge
+  deleteBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1.5,
+    borderColor: COLORS.red,
+    marginTop: SPACING.sm,
+  },
+  deleteBtnText: {
+    color: COLORS.red,
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

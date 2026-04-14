@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import type { Bridge, BridgeTag, BridgeTip, BridgeAddition } from '../types/database';
+import type { Bridge, BridgeTag, BridgeTip, BridgeAddition, BridgeFile } from '../types/database';
 
 interface BridgeState {
   bridges: Bridge[];
@@ -9,12 +9,14 @@ interface BridgeState {
   tips: BridgeTip[];
   additions: BridgeAddition[];
   pendingAdditions: BridgeAddition[];
+  files: BridgeFile[];
   loading: boolean;
   fetchBridges: () => Promise<void>;
   fetchBridge: (id: string) => Promise<void>;
   fetchSubBridges: (parentId: string) => Promise<Bridge[]>;
   createBridge: (bridge: Partial<Bridge>, tagIds: string[], imageUris: string[]) => Promise<{ error: string | null }>;
   updateBridge: (id: string, updates: Partial<Bridge>, tagIds: string[], imageUris: string[]) => Promise<{ error: string | null }>;
+  deleteBridge: (id: string) => Promise<{ error: string | null }>;
   rateBridge: (bridgeId: string, userId: string, rating: number) => Promise<void>;
   fetchAllTags: () => Promise<void>;
   createTag: (name: string) => Promise<BridgeTag | null>;
@@ -25,6 +27,10 @@ interface BridgeState {
   fetchPendingAdditions: (bridgeId: string) => Promise<void>;
   suggestAddition: (bridgeId: string, userId: string, content: string, link: string) => Promise<{ error: string | null }>;
   reviewAddition: (additionId: string, approved: boolean) => Promise<void>;
+  fetchFiles: (bridgeId: string) => Promise<void>;
+  addFile: (bridgeId: string, userId: string, file: { name: string; uri: string; type: string; size: number }) => Promise<{ error: string | null }>;
+  removeFile: (fileId: string, bridgeId: string) => Promise<{ error: string | null }>;
+  generateBridgeContent: (prompt: string) => Promise<{ content: string | null; error: string | null }>;
 }
 
 const mapBridgeRow = (bridgeRow: any): Bridge => ({
@@ -68,6 +74,7 @@ export const useBridgeStore = create<BridgeState>((set, get) => ({
   tips: [],
   additions: [],
   pendingAdditions: [],
+  files: [],
   loading: false,
 
   fetchBridges: async () => {
@@ -219,6 +226,7 @@ export const useBridgeStore = create<BridgeState>((set, get) => ({
       const { error: updateBridgeError } = await supabase.from('bridges').update({
         name: updates.name,
         description: updates.description,
+        updated_at: new Date().toISOString(),
       }).eq('id', id);
 
       if (updateBridgeError) {
@@ -487,5 +495,81 @@ export const useBridgeStore = create<BridgeState>((set, get) => ({
         await get().fetchPendingAdditions(data.bridge_id);
       }
     } catch (e) {}
+  },
+
+  // Delete bridge
+  deleteBridge: async (id) => {
+    try {
+      const { error } = await supabase.from('bridges').delete().eq('id', id);
+      if (error) return { error: 'שגיאה במחיקת הגשר' };
+      await get().fetchBridges();
+      return { error: null };
+    } catch (e) {
+      return { error: 'שגיאה במחיקת הגשר' };
+    }
+  },
+
+  // Files
+  fetchFiles: async (bridgeId) => {
+    try {
+      const { data } = await supabase
+        .from('bridge_files')
+        .select('*, uploader:users!uploaded_by(full_name)')
+        .eq('bridge_id', bridgeId)
+        .order('created_at', { ascending: false });
+      set({ files: (data || []) as BridgeFile[] });
+    } catch (e) {
+      set({ files: [] });
+    }
+  },
+
+  addFile: async (bridgeId, userId, file) => {
+    try {
+      const { error } = await supabase.from('bridge_files').insert({
+        bridge_id: bridgeId,
+        file_name: file.name,
+        file_uri: file.uri,
+        file_type: file.type,
+        file_size: file.size,
+        uploaded_by: userId,
+      });
+      if (error) return { error: 'שגיאה בהעלאת הקובץ' };
+      await get().fetchFiles(bridgeId);
+      return { error: null };
+    } catch (e) {
+      return { error: 'שגיאה בהעלאת הקובץ' };
+    }
+  },
+
+  removeFile: async (fileId, bridgeId) => {
+    try {
+      const { error } = await supabase.from('bridge_files').delete().eq('id', fileId);
+      if (error) return { error: 'שגיאה במחיקת הקובץ' };
+      await get().fetchFiles(bridgeId);
+      return { error: null };
+    } catch (e) {
+      return { error: 'שגיאה במחיקת הקובץ' };
+    }
+  },
+
+  // AI content generation
+  generateBridgeContent: async (prompt) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('medit-chat', {
+        body: {
+          messages: [
+            {
+              role: 'system',
+              content: 'אתה עוזר כתיבה למערכת MEDNET. תפקידך לעזור לסטודנטים לרפואה לכתוב תוכן לגשרים (נושאים/קהילות). כתוב בעברית, בצורה ברורה, תמציתית ומקצועית. אל תוסיף כותרות או פורמט מיוחד, רק את התוכן עצמו.',
+            },
+            { role: 'user', content: prompt },
+          ],
+        },
+      });
+      if (error) return { content: null, error: 'שגיאה ביצירת תוכן AI' };
+      return { content: data?.response || null, error: null };
+    } catch (e) {
+      return { content: null, error: 'שגיאה ביצירת תוכן AI' };
+    }
   },
 }));

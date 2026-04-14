@@ -50,7 +50,12 @@
       "Bash(taskkill //F //PID 11584)",
       "Bash(taskkill //F //PID 21124)",
       "Bash(rm -rf .expo node_modules/.cache)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git pull:*)",
+      "Bash(git fetch:*)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

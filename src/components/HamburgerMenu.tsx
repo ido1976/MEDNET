@@ -19,10 +19,11 @@ import NotificationBell from './NotificationBell';
 
 const MENU_ITEMS = [
   { label: 'בית', icon: 'home', route: '/(tabs)/' },
-  { label: 'MEDIT', icon: 'chatbubble-ellipses', route: '/(tabs)/chat' },
+  { label: 'CHATMED', icon: 'chatbubble-ellipses', route: '/(tabs)/chat' },
   { label: 'גשרים', icon: 'git-network', route: '/(tabs)/discover' },
   { label: 'דיונים', icon: 'chatbubbles', route: '/(tabs)/discussions/' },
   { label: 'אירועים', icon: 'calendar', route: '/(tabs)/events/' },
+  { label: 'יד שנייה מרופאה', icon: 'bag-handle', route: '/(tabs)/secondhand/' },
   { label: 'דירות', icon: 'home-outline', route: '/(tabs)/apartments/' },
   { label: 'טרמפים', icon: 'car', route: '/(tabs)/rides/' },
   { label: 'מחירון', icon: 'pricetag', route: '/(tabs)/prices/' },

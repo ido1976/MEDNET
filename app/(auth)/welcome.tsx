@@ -20,7 +20,7 @@ const TOPIC_CARDS = [
   { icon: 'home', title: 'דיור', desc: 'מצא דירה או שותפים בצפת', color: '#50B878' },
   { icon: 'car', title: 'טרמפים', desc: 'שתף נסיעות וחסוך', color: '#9B59B6' },
   { icon: 'calendar', title: 'אירועים', desc: 'מפגשים, הרצאות וסדנאות', color: '#F4C542' },
-  { icon: 'chatbubble-ellipses', title: 'MEDIT', desc: 'העוזר החכם שלך', color: '#2d5a3d' },
+  { icon: 'chatbubble-ellipses', title: 'CHATMED', desc: 'העוזר החכם שלך', color: '#2d5a3d' },
 ];
 
 export default function WelcomeScreen() {

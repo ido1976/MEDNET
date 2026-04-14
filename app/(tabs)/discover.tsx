@@ -9,6 +9,7 @@ import {
   FlatList,
   Modal,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +26,7 @@ import type { Bridge } from '../../src/types/database';
 
 export default function DiscoverScreen() {
   const router = useRouter();
-  const { bridges, fetchBridges, createBridge, allTags, fetchAllTags, createTag, loading } = useBridgeStore();
+  const { bridges, fetchBridges, createBridge, allTags, fetchAllTags, createTag, generateBridgeContent, loading } = useBridgeStore();
   const { user, session } = useAuthStore();
   const [search, setSearch] = useState('');
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
@@ -39,6 +40,10 @@ export default function DiscoverScreen() {
   const [bridgeType, setBridgeType] = useState<'main' | 'sub'>('main');
   const [parentBridgeId, setParentBridgeId] = useState<string | null>(null);
   const [showParentPicker, setShowParentPicker] = useState(false);
+  // AI writing mode
+  const [writeMode, setWriteMode] = useState<'manual' | 'ai'>('manual');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     fetchBridges();
@@ -49,7 +54,7 @@ export default function DiscoverScreen() {
     if (!newName.trim()) { Alert.alert('שגיאה', 'נא להזין שם לגשר'); return; }
     if (!session?.user?.id || !user?.id) { Alert.alert('שגיאה', 'פג תוקף ההתחברות. יש לצאת ולהתחבר מחדש'); return; }
     if (newTagIds.length === 0) { Alert.alert('שגיאה', 'יש לבחור לפחות תגית אחת'); return; }
-    if (bridgeType === 'sub' && !parentBridgeId) { Alert.alert('שגיאה', 'יש לבחור גשר אב'); return; }
+    if (bridgeType === 'sub' && !parentBridgeId) { Alert.alert('שגיאה', 'יש לבחור גשר אם'); return; }
 
     const result = await createBridge(
       {
@@ -79,6 +84,26 @@ export default function DiscoverScreen() {
     setNewImages([]);
     setBridgeType('main');
     setParentBridgeId(null);
+    setWriteMode('manual');
+    setAiPrompt('');
+  };
+
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim()) {
+      Alert.alert('שגיאה', 'נא להזין הנחיה ל-AI');
+      return;
+    }
+    setAiLoading(true);
+    const prompt = `כתוב תיאור לגשר בנושא "${newName || 'ללא שם'}" עבור קהילת סטודנטים לרפואה. ההנחיה מהמשתמש: ${aiPrompt}`;
+    const result = await generateBridgeContent(prompt);
+    setAiLoading(false);
+    if (result.error) {
+      Alert.alert('שגיאה', result.error);
+      return;
+    }
+    if (result.content) {
+      setNewDesc(result.content);
+    }
   };
 
   const handleToggleTag = (tagId: string) => {
@@ -146,7 +171,7 @@ export default function DiscoverScreen() {
             {/* Parent bridge picker */}
             {bridgeType === 'sub' && (
               <>
-                <Text style={styles.modalLabel}>גשר אב:</Text>
+                <Text style={styles.modalLabel}>גשר אם:</Text>
                 <TouchableOpacity
                   style={styles.parentPicker}
                   onPress={() => setShowParentPicker(true)}
@@ -160,7 +185,63 @@ export default function DiscoverScreen() {
             )}
 
             <TextInput style={styles.modalInput} placeholder="שם הגשר" value={newName} onChangeText={setNewName} textAlign="right" placeholderTextColor={COLORS.grayLight} />
-            <TextInput style={[styles.modalInput, { height: 80 }]} placeholder="תיאור" value={newDesc} onChangeText={setNewDesc} textAlign="right" multiline placeholderTextColor={COLORS.grayLight} />
+
+            {/* Writing mode toggle */}
+            <Text style={styles.modalLabel}>תיאור הגשר:</Text>
+            <View style={styles.writeModeRow}>
+              <TouchableOpacity
+                style={[styles.writeModeBtn, writeMode === 'manual' && styles.writeModeBtnActive]}
+                onPress={() => setWriteMode('manual')}
+              >
+                <Ionicons name="pencil" size={16} color={writeMode === 'manual' ? COLORS.white : COLORS.primaryDark} />
+                <Text style={[styles.writeModeText, writeMode === 'manual' && styles.writeModeTextActive]}>כתיבה ידנית</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.writeModeBtn, writeMode === 'ai' && styles.writeModeBtnActive]}
+                onPress={() => setWriteMode('ai')}
+              >
+                <Ionicons name="sparkles" size={16} color={writeMode === 'ai' ? COLORS.white : COLORS.primaryDark} />
+                <Text style={[styles.writeModeText, writeMode === 'ai' && styles.writeModeTextActive]}>עזרת AI</Text>
+              </TouchableOpacity>
+            </View>
+
+            {writeMode === 'ai' && (
+              <View style={styles.aiSection}>
+                <TextInput
+                  style={[styles.modalInput, { height: 60 }]}
+                  placeholder="תאר ל-AI מה אתה רוצה שייכתב..."
+                  placeholderTextColor={COLORS.grayLight}
+                  value={aiPrompt}
+                  onChangeText={setAiPrompt}
+                  textAlign="right"
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[styles.aiGenerateBtn, aiLoading && { opacity: 0.7 }]}
+                  onPress={handleAiGenerate}
+                  disabled={aiLoading}
+                >
+                  {aiLoading ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles" size={16} color={COLORS.white} />
+                      <Text style={styles.aiGenerateBtnText}>צור תוכן</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <TextInput
+              style={[styles.modalInput, { height: 100, textAlignVertical: 'top' }]}
+              placeholder={writeMode === 'ai' ? 'התוכן שנוצר יופיע כאן - ניתן לערוך' : 'תיאור הגשר'}
+              value={newDesc}
+              onChangeText={setNewDesc}
+              textAlign="right"
+              multiline
+              placeholderTextColor={COLORS.grayLight}
+            />
 
             {/* Tag selection */}
             <Text style={styles.modalLabel}>תגיות:</Text>
@@ -206,7 +287,7 @@ export default function DiscoverScreen() {
               <TouchableOpacity onPress={() => setShowParentPicker(false)}>
                 <Ionicons name="close" size={24} color={COLORS.gray} />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>בחר גשר אב</Text>
+              <Text style={styles.modalTitle}>בחר גשר אם</Text>
               <View style={{ width: 24 }} />
             </View>
             <FlatList
@@ -269,7 +350,7 @@ export default function DiscoverScreen() {
       {/* Bridges List */}
       <FlatList
         data={filteredBridges}
-        renderItem={({ item }) => <BridgeCard bridge={item} variant="large" />}
+        renderItem={({ item }) => <BridgeCard bridge={item} variant="large" currentUserId={user?.id} />}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -318,25 +399,31 @@ const styles = StyleSheet.create({
   },
   tagsContainer: {
     marginTop: SPACING.md,
+    minHeight: 48,
+    flexGrow: 0,
   },
   tagsRow: {
     paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
     gap: SPACING.sm,
+    alignItems: 'center',
   },
   tagChip: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: RADIUS.xl,
     backgroundColor: COLORS.cardBg,
     borderWidth: 1.5,
     borderColor: COLORS.grayLight,
+    minHeight: 38,
+    justifyContent: 'center',
   },
   tagChipActive: {
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
   tagText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
     color: COLORS.primaryDark,
   },
@@ -507,5 +594,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.primaryDark,
     fontWeight: '500',
+  },
+  // AI writing mode
+  writeModeRow: {
+    flexDirection: 'row-reverse',
+    gap: SPACING.sm,
+  },
+  writeModeBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.grayLight,
+    backgroundColor: COLORS.cardBg,
+  },
+  writeModeBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  writeModeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+  },
+  writeModeTextActive: {
+    color: COLORS.white,
+  },
+  aiSection: {
+    gap: SPACING.sm,
+  },
+  aiGenerateBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accent,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+  },
+  aiGenerateBtnText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

@@ -96,7 +96,7 @@ export default function DiscussionChatScreen() {
         </View>
         <TouchableOpacity onPress={() => router.push('/(tabs)/chat')}>
           <View style={styles.meditBadge}>
-            <Text style={styles.meditBadgeText}>MEDIT</Text>
+            <Text style={styles.meditBadgeText}>CHATMED</Text>
           </View>
         </TouchableOpacity>
       </View>

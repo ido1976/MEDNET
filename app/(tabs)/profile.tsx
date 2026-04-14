@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Image,
   TextInput,
   Alert,
+  FlatList,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +17,9 @@ import ScreenWrapper from '../../src/components/ScreenWrapper';
 import HamburgerMenu from '../../src/components/HamburgerMenu';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useFriendStore } from '../../src/stores/friendStore';
 import { getInitials, YEAR_LABELS, INTEREST_OPTIONS } from '../../src/lib/helpers';
+import type { User, Friendship } from '../../src/types/database';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -25,6 +28,62 @@ export default function ProfileScreen() {
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [yearOfStudy, setYearOfStudy] = useState<number | null>(user?.year_of_study || null);
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
+  const [userType, setUserType] = useState<'student' | 'family_member'>(
+    (user as any)?.user_type || 'student'
+  );
+
+  // Friends
+  const {
+    friends, incomingRequests, searchResults, loading: friendsLoading,
+    fetchFriends, fetchRequests, searchUsers, sendFriendRequest, acceptFriend, rejectFriend,
+  } = useFriendStore();
+  const [friendSearch, setFriendSearch] = useState('');
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchFriends(user.id);
+      fetchRequests(user.id);
+    }
+  }, [user?.id]);
+
+  const handleFriendSearch = (text: string) => {
+    setFriendSearch(text);
+    if (user?.id) searchUsers(text, user.id);
+  };
+
+  const handleSendRequest = async (addresseeId: string) => {
+    if (!user?.id) return;
+    const result = await sendFriendRequest(user.id, addresseeId);
+    if (result.error) {
+      Alert.alert('שגיאה', result.error);
+    } else {
+      Alert.alert('נשלח', 'בקשת חברות נשלחה');
+      setFriendSearch('');
+      searchUsers('', user.id);
+    }
+  };
+
+  const handleAcceptFriend = async (friendshipId: string) => {
+    const result = await acceptFriend(friendshipId);
+    if (!result.error && user?.id) {
+      fetchFriends(user.id);
+      fetchRequests(user.id);
+    }
+  };
+
+  const handleRejectFriend = async (friendshipId: string) => {
+    const result = await rejectFriend(friendshipId);
+    if (!result.error && user?.id) {
+      fetchRequests(user.id);
+    }
+  };
+
+  const getFriendUser = (friendship: Friendship): any => {
+    const req = (friendship as any).requester;
+    const addr = (friendship as any).addressee;
+    if (req?.id === user?.id) return addr;
+    return req;
+  };
 
   // Sync local state when user data loads/changes
   React.useEffect(() => {
@@ -32,15 +91,17 @@ export default function ProfileScreen() {
       setFullName(user.full_name || '');
       setYearOfStudy(user.year_of_study || null);
       setInterests(user.interests || []);
+      setUserType((user as any)?.user_type || 'student');
     }
-  }, [user?.full_name, user?.year_of_study, user?.interests?.length]);
+  }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type]);
 
   const handleSave = async () => {
     const { error } = await updateProfile({
       full_name: fullName,
       year_of_study: yearOfStudy,
       interests,
-    });
+      user_type: userType,
+    } as any);
     if (error) {
       Alert.alert('שגיאה', error);
     } else {
@@ -186,6 +247,35 @@ export default function ProfileScreen() {
               </Text>
             )}
           </View>
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>סוג משתמש</Text>
+            {editing ? (
+              <View style={styles.yearRow}>
+                <TouchableOpacity
+                  style={[styles.yearChip, userType === 'student' && styles.yearChipActive]}
+                  onPress={() => setUserType('student')}
+                >
+                  <Text style={[styles.yearChipText, userType === 'student' && styles.yearChipTextActive]}>
+                    סטודנט
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.yearChip, userType === 'family_member' && styles.yearChipActive]}
+                  onPress={() => setUserType('family_member')}
+                >
+                  <Text style={[styles.yearChipText, userType === 'family_member' && styles.yearChipTextActive]}>
+                    בן משפחה של סטודנט
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.fieldValue}>
+                {userType === 'family_member' ? 'בן משפחה של סטודנט' : 'סטודנט'}
+              </Text>
+            )}
+          </View>
         </View>
 
         {/* Role Badge */}
@@ -194,6 +284,112 @@ export default function ProfileScreen() {
           <Text style={styles.roleText}>
             {user?.role === 'admin' ? 'מנהל' : user?.role === 'moderator' ? 'מנחה' : 'סטודנט'}
           </Text>
+        </View>
+
+        {/* Friends Section */}
+        <View style={styles.friendsSection}>
+          <Text style={styles.friendsSectionTitle}>חברים</Text>
+
+          {/* Search */}
+          <View style={styles.friendSearchRow}>
+            <Ionicons name="search" size={18} color={COLORS.gray} />
+            <TextInput
+              style={styles.friendSearchInput}
+              placeholder="חפש חברים..."
+              placeholderTextColor={COLORS.grayLight}
+              value={friendSearch}
+              onChangeText={handleFriendSearch}
+              textAlign="right"
+            />
+          </View>
+
+          {/* Search Results */}
+          {friendSearch.length > 0 && searchResults.length > 0 && (
+            <View style={styles.searchResultsList}>
+              {searchResults.map((u) => (
+                <View key={u.id} style={styles.friendRow}>
+                  <TouchableOpacity
+                    style={styles.addFriendBtn}
+                    onPress={() => handleSendRequest(u.id)}
+                  >
+                    <Ionicons name="person-add" size={16} color={COLORS.primary} />
+                  </TouchableOpacity>
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName}>{u.full_name}</Text>
+                  </View>
+                  {u.avatar_url ? (
+                    <Image source={{ uri: u.avatar_url }} style={styles.friendAvatar} />
+                  ) : (
+                    <View style={styles.friendAvatarPlaceholder}>
+                      <Text style={styles.friendAvatarText}>{getInitials(u.full_name)}</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Incoming Requests */}
+          {incomingRequests.length > 0 && (
+            <View style={styles.requestsSection}>
+              <Text style={styles.requestsTitle}>בקשות חברות ({incomingRequests.length})</Text>
+              {incomingRequests.map((req) => {
+                const reqUser = (req as any).requester;
+                return (
+                  <View key={req.id} style={styles.friendRow}>
+                    <View style={styles.requestActions}>
+                      <TouchableOpacity
+                        style={styles.acceptBtn}
+                        onPress={() => handleAcceptFriend(req.id)}
+                      >
+                        <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.rejectBtn}
+                        onPress={() => handleRejectFriend(req.id)}
+                      >
+                        <Ionicons name="close" size={16} color={COLORS.red} />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.friendInfo}>
+                      <Text style={styles.friendName}>{reqUser?.full_name || 'משתמש'}</Text>
+                    </View>
+                    {reqUser?.avatar_url ? (
+                      <Image source={{ uri: reqUser.avatar_url }} style={styles.friendAvatar} />
+                    ) : (
+                      <View style={styles.friendAvatarPlaceholder}>
+                        <Text style={styles.friendAvatarText}>{getInitials(reqUser?.full_name || '?')}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Friends List */}
+          {friends.length > 0 ? (
+            friends.map((f) => {
+              const friendUser = getFriendUser(f);
+              return (
+                <View key={f.id} style={styles.friendRow}>
+                  <Ionicons name="checkmark-circle" size={18} color={COLORS.primary} />
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName}>{friendUser?.full_name || 'משתמש'}</Text>
+                  </View>
+                  {friendUser?.avatar_url ? (
+                    <Image source={{ uri: friendUser.avatar_url }} style={styles.friendAvatar} />
+                  ) : (
+                    <View style={styles.friendAvatarPlaceholder}>
+                      <Text style={styles.friendAvatarText}>{getInitials(friendUser?.full_name || '?')}</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.noFriendsText}>אין חברים עדיין - חפש והוסף חברים!</Text>
+          )}
         </View>
 
         {/* Sign Out */}
@@ -362,6 +558,129 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.primaryDark,
+  },
+  // Friends
+  friendsSection: {
+    width: '100%',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.lg,
+    marginTop: SPACING.md,
+    ...SHADOWS.card,
+  },
+  friendsSectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+    textAlign: 'right',
+    marginBottom: SPACING.sm,
+  },
+  friendSearchRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: COLORS.cream,
+    borderRadius: RADIUS.xl,
+    paddingHorizontal: SPACING.md,
+    height: 40,
+    gap: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.grayLight,
+    marginBottom: SPACING.sm,
+  },
+  friendSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.black,
+    writingDirection: 'rtl',
+  },
+  searchResultsList: {
+    backgroundColor: COLORS.cream,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.grayLight,
+  },
+  friendRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.grayLight,
+  },
+  friendAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  friendAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  friendAvatarText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  friendInfo: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  friendName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+  },
+  addFriendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestsSection: {
+    marginBottom: SPACING.sm,
+  },
+  requestsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.accent,
+    textAlign: 'right',
+    marginBottom: SPACING.xs,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  acceptBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noFriendsText: {
+    fontSize: 14,
+    color: COLORS.gray,
+    textAlign: 'center',
+    paddingVertical: SPACING.md,
   },
   signOutBtn: {
     flexDirection: 'row-reverse',

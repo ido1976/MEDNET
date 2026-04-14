@@ -15,7 +15,7 @@ export default function FloatingMedit() {
     >
       <View style={styles.inner}>
         <Ionicons name="chatbubble-ellipses" size={22} color={COLORS.white} />
-        <Text style={styles.label}>MEDIT</Text>
+        <Text style={styles.label}>CHATMED</Text>
       </View>
     </TouchableOpacity>
   );

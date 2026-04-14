@@ -4,11 +4,13 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, SPACING } from '../constants/theme';
 import StarRating from './StarRating';
+import { formatDate } from '../lib/helpers';
 import type { Bridge } from '../types/database';
 
 interface BridgeCardProps {
   bridge: Bridge;
   variant?: 'large' | 'compact';
+  currentUserId?: string;
 }
 
 const BRIDGE_ICONS: Record<string, string> = {
@@ -22,7 +24,7 @@ const BRIDGE_ICONS: Record<string, string> = {
   'כללי': 'grid',
 };
 
-export default function BridgeCard({ bridge, variant = 'large' }: BridgeCardProps) {
+export default function BridgeCard({ bridge, variant = 'large', currentUserId }: BridgeCardProps) {
   const router = useRouter();
 
   const handlePress = () => {
@@ -89,6 +91,25 @@ export default function BridgeCard({ bridge, variant = 'large' }: BridgeCardProp
           </View>
         )}
 
+        {/* Creator and date info */}
+        <View style={styles.metaRow}>
+          {currentUserId && bridge.created_by === currentUserId ? (
+            <View style={styles.myBadge}>
+              <Ionicons name="person" size={12} color={COLORS.white} />
+              <Text style={styles.myBadgeText}>שלי</Text>
+            </View>
+          ) : bridge.creator?.full_name ? (
+            <View style={styles.metaItem}>
+              <Text style={styles.metaText}>{bridge.creator.full_name}</Text>
+              <Ionicons name="person-outline" size={13} color={COLORS.gray} />
+            </View>
+          ) : null}
+          <View style={styles.metaItem}>
+            <Text style={styles.metaText}>{formatDate(bridge.created_at)}</Text>
+            <Ionicons name="calendar-outline" size={13} color={COLORS.gray} />
+          </View>
+        </View>
+
         <View style={styles.largeFooter}>
           <StarRating rating={bridge.rating_avg} size={16} />
           <View style={styles.arrowContainer}>
@@ -150,19 +171,50 @@ const styles = StyleSheet.create({
   tagsRow: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: SPACING.sm,
+    gap: 8,
+    marginBottom: SPACING.md,
   },
   tagChip: {
-    backgroundColor: COLORS.primary + '15',
+    backgroundColor: COLORS.primary + '18',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
+  },
+  tagText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  metaRow: {
+    flexDirection: 'row-reverse',
+    gap: SPACING.md,
+    marginBottom: SPACING.sm,
+    alignItems: 'center',
+  },
+  metaItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
+    fontSize: 12,
+    color: COLORS.gray,
+  },
+  myBadge: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: RADIUS.xl,
   },
-  tagText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.primary,
+  myBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.white,
   },
   largeFooter: {
     flexDirection: 'row-reverse',

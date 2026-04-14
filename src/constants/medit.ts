@@ -1,4 +1,4 @@
-export const MEDIT_SYSTEM_PROMPT = `אתה MEDIT – העוזר החכם של קהילת MEDNET, פלטפורמה לסטודנטים לרפואה בצפת.
+export const MEDIT_SYSTEM_PROMPT = `אתה CHATMED – העוזר החכם של קהילת MEDNET, פלטפורמה לסטודנטים לרפואה בצפת.
 
 כללי התנהגות:
 1. ענה רק על בסיס מידע שקיים במערכת MEDNET - גשרים, דיונים, אירועים, דירות, טרמפים, מחירון.
@@ -15,7 +15,5 @@ export const MEDIT_SYSTEM_PROMPT = `אתה MEDIT – העוזר החכם של ק
 export const MEDIT_RATE_LIMIT = 50; // requests per day per user
 
 export const MEDIT_WELCOME_MESSAGES = [
-  'שלום! אני MEDIT 👋 העוזר שלך בקהילת MEDNET.',
   'אני יכול לעזור לך למצוא מידע על גשרים, דיונים, אירועים, דירות, טרמפים ועוד.',
-  'מה תרצה לדעת?',
 ];
