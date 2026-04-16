@@ -1,21 +1,34 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import type { Notification } from '../types/database';
+import type { Notification, NotificationPreference, PendingAction } from '../types/database';
 
 interface NotificationState {
   notifications: Notification[];
   unreadCount: number;
   loading: boolean;
+  preferences: NotificationPreference[];
+  pendingActions: PendingAction[];
+  pendingActionsCount: number;
   fetchNotifications: (userId: string) => Promise<void>;
   markAsRead: (notificationId: string) => Promise<void>;
   markAllRead: (userId: string) => Promise<void>;
   subscribeToNotifications: (userId: string) => () => void;
+  // Notification preferences
+  fetchPreferences: () => Promise<void>;
+  updatePreference: (type: string, enabled: boolean, channel?: string) => Promise<void>;
+  // Pending actions
+  fetchPendingActions: () => Promise<void>;
+  completePendingAction: (actionId: string) => Promise<void>;
+  dismissPendingAction: (actionId: string) => Promise<void>;
 }
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
   loading: false,
+  preferences: [],
+  pendingActions: [],
+  pendingActionsCount: 0,
 
   fetchNotifications: async (userId) => {
     set({ loading: true });
@@ -76,5 +89,74 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     return () => {
       supabase.removeChannel(channel);
     };
+  },
+
+  // Notification preferences
+  fetchPreferences: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      const { data } = await supabase
+        .from('notification_preferences')
+        .select('*')
+        .eq('user_id', session.user.id);
+      set({ preferences: (data || []) as NotificationPreference[] });
+    } catch (e) {}
+  },
+
+  updatePreference: async (type, enabled, channel = 'in_app') => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      await supabase
+        .from('notification_preferences')
+        .upsert({
+          user_id: session.user.id,
+          notification_type: type,
+          enabled,
+          channel,
+        });
+      await get().fetchPreferences();
+    } catch (e) {}
+  },
+
+  // Pending actions
+  fetchPendingActions: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      const { data } = await supabase
+        .from('pending_actions')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('status', 'pending')
+        .order('due_date', { ascending: true, nullsFirst: false });
+
+      const actions = (data || []) as PendingAction[];
+      set({ pendingActions: actions, pendingActionsCount: actions.length });
+    } catch (e) {}
+  },
+
+  completePendingAction: async (actionId) => {
+    try {
+      await supabase
+        .from('pending_actions')
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('id', actionId);
+      await get().fetchPendingActions();
+    } catch (e) {}
+  },
+
+  dismissPendingAction: async (actionId) => {
+    try {
+      await supabase
+        .from('pending_actions')
+        .update({ status: 'dismissed' })
+        .eq('id', actionId);
+      await get().fetchPendingActions();
+    } catch (e) {}
   },
 }));

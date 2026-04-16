@@ -26,6 +26,7 @@ import AdditionCard from '../../../src/components/AdditionCard';
 import TagSearchModal from '../../../src/components/TagSearchModal';
 import BridgeImagePicker from '../../../src/components/BridgeImagePicker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
+import { trackView } from '../../../src/lib/activityTracker';
 import { useBridgeStore } from '../../../src/stores/bridgeStore';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { useAuthStore } from '../../../src/stores/authStore';
@@ -94,6 +95,7 @@ export default function BridgeDetailScreen() {
   const loadData = async () => {
     if (!id) return;
     setLoading(true);
+    trackView('bridge', id);
     await Promise.all([
       fetchBridge(id),
       fetchDiscussions(id),

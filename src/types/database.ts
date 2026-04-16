@@ -9,6 +9,22 @@ export interface User {
   role: 'student' | 'admin' | 'moderator';
   user_type: 'student' | 'family_member';
   created_at: string;
+  // Phase 1: Enhanced profile fields
+  marital_status: 'single' | 'in_relationship' | 'married';
+  partner_user_id: string | null;
+  has_children: boolean;
+  children_ages: number[];
+  settlement: string | null;
+  languages: string[];
+  academic_track: string | null;
+  bio: string | null;
+  phone: string | null;
+  graduation_year: number | null;
+  origin_city: string | null;
+  profile_completeness: number;
+  onboarding_completed_at: string | null;
+  // Joined relations
+  partner?: User;
 }
 
 export interface BridgeTag {
@@ -235,7 +251,89 @@ export interface Friendship {
   requester_id: string;
   addressee_id: string;
   status: 'pending' | 'accepted' | 'rejected';
+  relationship_type: 'friend' | 'partner' | 'family' | 'study_buddy';
   created_at: string;
   requester?: User;
   addressee?: User;
+}
+
+// ============================================
+// Phase 1: User Context Engine types
+// ============================================
+
+export interface UserTagSubscription {
+  user_id: string;
+  tag_id: string;
+  subscribed_at: string;
+  tag?: BridgeTag;
+}
+
+export interface UserActivity {
+  id: string;
+  user_id: string;
+  activity_type: 'view' | 'create' | 'react' | 'search' | 'bookmark' | 'share';
+  target_type: 'bridge' | 'discussion' | 'event' | 'ride' | 'secondhand' | 'apartment' | 'price' | 'community' | 'chat';
+  target_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface UserSearchHistory {
+  id: string;
+  user_id: string;
+  query: string;
+  result_count: number;
+  context: 'bridges' | 'discussions' | 'secondhand' | 'chat' | 'events' | 'rides' | 'apartments' | 'prices' | 'global';
+  created_at: string;
+}
+
+export interface UserCircle {
+  id: string;
+  name: string;
+  circle_type: 'year_group' | 'settlement' | 'interest' | 'custom';
+  auto_generated: boolean;
+  created_by: string | null;
+  created_at: string;
+  members?: UserCircleMember[];
+  member_count?: number;
+}
+
+export interface UserCircleMember {
+  circle_id: string;
+  user_id: string;
+  joined_at: string;
+  user?: User;
+}
+
+export interface NotificationPreference {
+  user_id: string;
+  notification_type: 'new_bridge' | 'new_event' | 'discussion_update' | 'form_reminder' | 'chat_suggestion' | 'friend_request' | 'content_reaction' | 'system';
+  enabled: boolean;
+  channel: 'in_app' | 'push' | 'email';
+}
+
+export interface PendingAction {
+  id: string;
+  user_id: string;
+  action_type: 'form' | 'survey' | 'profile_update' | 'rsvp' | 'document';
+  title: string;
+  description: string | null;
+  url: string | null;
+  metadata: Record<string, unknown>;
+  status: 'pending' | 'completed' | 'dismissed' | 'expired';
+  due_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ChatInteraction {
+  id: string;
+  user_id: string;
+  question: string;
+  topic_tags: string[];
+  response_summary: string | null;
+  response_helpful: boolean | null;
+  session_id: string | null;
+  created_at: string;
 }

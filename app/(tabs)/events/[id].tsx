@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../../src/components/ScreenWrapper';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
+import { trackView } from '../../../src/lib/activityTracker';
 import { useEventStore } from '../../../src/stores/eventStore';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { useAuthStore } from '../../../src/stores/authStore';
@@ -40,6 +41,7 @@ export default function EventDetailScreen() {
   const loadData = async () => {
     if (!id) return;
     setLoading(true);
+    trackView('event', id);
     await Promise.all([
       fetchEvent(id),
       fetchRsvps(id),
