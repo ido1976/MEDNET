@@ -170,14 +170,12 @@ export const useMeditStore = create<MeditState>((set, get) => ({
 
       // Save user message to Supabase (fire and forget — don't block UI)
       if (sessionId && userId) {
-        Promise.resolve(
-          supabase.from('chat_messages').insert({
-            session_id: sessionId,
-            user_id: userId,
-            role: 'user',
-            content,
-          })
-        ).catch(() => {});
+        supabase.from('chat_messages').insert({
+          session_id: sessionId,
+          user_id: userId,
+          role: 'user',
+          content,
+        }).then(() => {}, () => {});
       }
 
       // Build full message history for the API (includes the optimistic user message)
@@ -218,6 +216,13 @@ export const useMeditStore = create<MeditState>((set, get) => ({
         timestamp: Date.now(),
       };
       set(state => ({ messages: [...state.messages, errorMessage], loading: false }));
+      // Persist error state so it survives app restart
+      const sessionId = get().currentSessionId;
+      const updatedMessages = get().messages;
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+        session_id: sessionId,
+        messages: updatedMessages,
+      })).catch(() => {});
     }
   },
 }));
