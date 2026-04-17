@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import type { User } from '../types/database';
+import type { User, BridgeTag, UserTagSubscription } from '../types/database';
 
 interface AuthState {
   user: User | null;
   session: any | null;
   loading: boolean;
   onboardingStep: number;
+  subscribedTags: BridgeTag[];
   setUser: (user: User | null) => void;
   setSession: (session: any) => void;
   setLoading: (loading: boolean) => void;
@@ -18,6 +19,13 @@ interface AuthState {
   fetchProfile: () => Promise<void>;
   updateProfile: (updates: Partial<User>) => Promise<{ error: string | null }>;
   initialize: () => Promise<void>;
+  // Tag subscriptions
+  fetchSubscribedTags: () => Promise<void>;
+  subscribeToTag: (tagId: string) => Promise<void>;
+  unsubscribeFromTag: (tagId: string) => Promise<void>;
+  // Couple sync
+  sendPartnerRequest: (partnerUserId: string) => Promise<{ error: string | null }>;
+  acceptPartnerRequest: (requesterId: string) => Promise<{ error: string | null }>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -25,6 +33,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: true,
   onboardingStep: 0,
+  subscribedTags: [],
 
   setUser: (user) => set({ user }),
   setSession: (session) => set({ session }),
@@ -138,6 +147,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (session) {
         set({ session });
         await get().fetchProfile();
+        await get().fetchSubscribedTags();
       }
     } finally {
       set({ loading: false });
@@ -147,9 +157,103 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ session });
       if (session) {
         get().fetchProfile();
+        get().fetchSubscribedTags();
       } else {
-        set({ user: null });
+        set({ user: null, subscribedTags: [] });
       }
     });
+  },
+
+  // Tag subscriptions
+  fetchSubscribedTags: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      const { data } = await supabase
+        .from('user_tag_subscriptions')
+        .select('tag_id, subscribed_at, bridge_tags(id, name)')
+        .eq('user_id', session.user.id);
+
+      if (data) {
+        const tags = data
+          .map((sub: any) => sub.bridge_tags)
+          .filter(Boolean) as BridgeTag[];
+        set({ subscribedTags: tags });
+      }
+    } catch (e) {}
+  },
+
+  subscribeToTag: async (tagId) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      await supabase.from('user_tag_subscriptions').insert({
+        user_id: session.user.id,
+        tag_id: tagId,
+      });
+      await get().fetchSubscribedTags();
+    } catch (e) {}
+  },
+
+  unsubscribeFromTag: async (tagId) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    try {
+      await supabase
+        .from('user_tag_subscriptions')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('tag_id', tagId);
+      await get().fetchSubscribedTags();
+    } catch (e) {}
+  },
+
+  // Couple sync
+  sendPartnerRequest: async (partnerUserId) => {
+    const user = get().user;
+    if (!user) return { error: 'לא מחובר' };
+
+    try {
+      // Update own profile with partner ID (pending)
+      await supabase.from('users').update({ partner_user_id: partnerUserId }).eq('id', user.id);
+
+      // Create a notification for the partner
+      await supabase.from('notifications').insert({
+        user_id: partnerUserId,
+        type: 'partner_request',
+        reference_id: user.id,
+        bridge_id: null,
+      });
+
+      return { error: null };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  },
+
+  acceptPartnerRequest: async (requesterId) => {
+    const user = get().user;
+    if (!user) return { error: 'לא מחובר' };
+
+    try {
+      // Link both profiles
+      await supabase.from('users').update({ partner_user_id: requesterId }).eq('id', user.id);
+
+      // Notify the requester
+      await supabase.from('notifications').insert({
+        user_id: requesterId,
+        type: 'partner_accepted',
+        reference_id: user.id,
+        bridge_id: null,
+      });
+
+      await get().fetchProfile();
+      return { error: null };
+    } catch (e: any) {
+      return { error: e.message };
+    }
   },
 }));

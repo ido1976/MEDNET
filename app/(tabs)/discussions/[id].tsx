@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
+import { trackView } from '../../../src/lib/activityTracker';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { useAuthStore } from '../../../src/stores/authStore';
 import { getInitials, formatTime } from '../../../src/lib/helpers';
@@ -30,6 +31,7 @@ export default function DiscussionChatScreen() {
 
   useEffect(() => {
     if (!id) return;
+    trackView('discussion', id);
     fetchDiscussion(id);
     fetchMessages(id);
     const unsubscribe = subscribeToMessages(id);

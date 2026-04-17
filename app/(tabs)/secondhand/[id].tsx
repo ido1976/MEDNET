@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../../src/components/ScreenWrapper';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
+import { trackView } from '../../../src/lib/activityTracker';
 import { useSecondhandStore } from '../../../src/stores/secondhandStore';
 import { useAuthStore } from '../../../src/stores/authStore';
 
@@ -36,6 +37,7 @@ export default function SecondhandDetailScreen() {
   const loadData = async () => {
     if (!id) return;
     setLoading(true);
+    trackView('secondhand', id);
     await fetchListing(id);
     setLoading(false);
   };

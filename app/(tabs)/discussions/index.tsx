@@ -19,6 +19,7 @@ import ChipPicker from '../../../src/components/ChipPicker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { useBridgeStore } from '../../../src/stores/bridgeStore';
+import { useAuthStore } from '../../../src/stores/authStore';
 import { useSharedListsStore } from '../../../src/stores/sharedListsStore';
 import { BRIDGE_TAGS } from '../../../src/lib/helpers';
 import { formatRelative } from '../../../src/lib/helpers';
@@ -30,10 +31,13 @@ export default function DiscussionsScreen() {
   const params = useLocalSearchParams<{ bridgeId?: string; eventId?: string; openCreate?: string }>();
   const { discussions, fetchDiscussions, createDiscussion, loading } = useDiscussionStore();
   const { bridges, fetchBridges, fetchSubBridges } = useBridgeStore();
+  const { subscribedTags } = useAuthStore();
   const { categories, addCategory } = useSharedListsStore();
   const discussionCategories = categories.discussions || BRIDGE_TAGS;
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [showMyTagsOnly, setShowMyTagsOnly] = useState(false);
+  const [subscribedBridgeIds, setSubscribedBridgeIds] = useState<string[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newTag, setNewTag] = useState(discussionCategories[0]);
@@ -50,6 +54,25 @@ export default function DiscussionsScreen() {
     fetchDiscussions(params.bridgeId);
     loadAllBridges();
   }, [params.bridgeId]);
+
+  // Fetch bridge IDs that match subscribed tags for filtering
+  useEffect(() => {
+    if (subscribedTags.length === 0) {
+      setSubscribedBridgeIds([]);
+      return;
+    }
+    const tagIds = subscribedTags.map((t) => t.id);
+    supabase
+      .from('bridge_tag_assignments')
+      .select('bridge_id')
+      .in('tag_id', tagIds)
+      .then(({ data }) => {
+        if (data) {
+          const ids = [...new Set(data.map((d: any) => d.bridge_id))];
+          setSubscribedBridgeIds(ids);
+        }
+      });
+  }, [subscribedTags]);
 
   // Auto-open create modal if coming from bridge/event page
   useEffect(() => {
@@ -116,7 +139,8 @@ export default function DiscussionsScreen() {
   const filteredDiscussions = discussions.filter((d) => {
     const matchSearch = !search || d.title.includes(search);
     const matchTag = !selectedTag || d.tag === selectedTag;
-    return matchSearch && matchTag;
+    const matchMyTags = !showMyTagsOnly || subscribedBridgeIds.includes(d.bridge_id);
+    return matchSearch && matchTag && matchMyTags;
   });
 
   const renderDiscussion = ({ item }: { item: Discussion }) => (
@@ -316,6 +340,25 @@ export default function DiscussionsScreen() {
         />
       </View>
 
+      {/* My Tags filter toggle */}
+      {subscribedTags.length > 0 && (
+        <View style={styles.myTagsRow}>
+          <TouchableOpacity
+            style={[styles.myTagsBtn, showMyTagsOnly && styles.myTagsBtnActive]}
+            onPress={() => setShowMyTagsOnly(!showMyTagsOnly)}
+          >
+            <Ionicons
+              name={showMyTagsOnly ? 'pricetag' : 'pricetag-outline'}
+              size={16}
+              color={showMyTagsOnly ? COLORS.white : COLORS.primary}
+            />
+            <Text style={[styles.myTagsBtnText, showMyTagsOnly && styles.myTagsBtnTextActive]}>
+              התיוגים שלי ({subscribedTags.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.tagsScroll}>
         <FlatList
           horizontal
@@ -382,6 +425,33 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     borderWidth: 1,
     borderColor: COLORS.grayLight,
+  },
+  myTagsRow: {
+    paddingHorizontal: SPACING.lg,
+    marginTop: SPACING.sm,
+    flexDirection: 'row-reverse',
+  },
+  myTagsBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.cardBg,
+  },
+  myTagsBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  myTagsBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  myTagsBtnTextActive: {
+    color: COLORS.white,
   },
   searchInput: {
     flex: 1,

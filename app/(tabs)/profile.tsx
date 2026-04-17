@@ -15,21 +15,33 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ScreenWrapper from '../../src/components/ScreenWrapper';
 import HamburgerMenu from '../../src/components/HamburgerMenu';
+import TagSelector from '../../src/components/TagSelector';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useBridgeStore } from '../../src/stores/bridgeStore';
 import { useFriendStore } from '../../src/stores/friendStore';
 import { getInitials, YEAR_LABELS, INTEREST_OPTIONS } from '../../src/lib/helpers';
 import type { User, Friendship } from '../../src/types/database';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, updateProfile, signOut } = useAuthStore();
+  const { user, updateProfile, signOut, subscribedTags, subscribeToTag, unsubscribeFromTag } = useAuthStore();
+  const { allTags, fetchAllTags, createTag } = useBridgeStore();
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [yearOfStudy, setYearOfStudy] = useState<number | null>(user?.year_of_study || null);
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [userType, setUserType] = useState<'student' | 'family_member'>(
     (user as any)?.user_type || 'student'
+  );
+  // Enhanced profile fields
+  const [bio, setBio] = useState(user?.bio || '');
+  const [settlement, setSettlement] = useState(user?.settlement || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [academicTrack, setAcademicTrack] = useState(user?.academic_track || '');
+  const [originCity, setOriginCity] = useState(user?.origin_city || '');
+  const [maritalStatus, setMaritalStatus] = useState<'single' | 'in_relationship' | 'married'>(
+    user?.marital_status || 'single'
   );
 
   // Friends
@@ -44,6 +56,7 @@ export default function ProfileScreen() {
       fetchFriends(user.id);
       fetchRequests(user.id);
     }
+    fetchAllTags();
   }, [user?.id]);
 
   const handleFriendSearch = (text: string) => {
@@ -92,8 +105,14 @@ export default function ProfileScreen() {
       setYearOfStudy(user.year_of_study || null);
       setInterests(user.interests || []);
       setUserType((user as any)?.user_type || 'student');
+      setBio(user.bio || '');
+      setSettlement(user.settlement || '');
+      setPhone(user.phone || '');
+      setAcademicTrack(user.academic_track || '');
+      setOriginCity(user.origin_city || '');
+      setMaritalStatus(user.marital_status || 'single');
     }
-  }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type]);
+  }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type, user?.bio, user?.settlement]);
 
   const handleSave = async () => {
     const { error } = await updateProfile({
@@ -101,6 +120,12 @@ export default function ProfileScreen() {
       year_of_study: yearOfStudy,
       interests,
       user_type: userType,
+      bio,
+      settlement,
+      phone,
+      academic_track: academicTrack,
+      origin_city: originCity,
+      marital_status: maritalStatus,
     } as any);
     if (error) {
       Alert.alert('שגיאה', error);
@@ -277,6 +302,127 @@ export default function ProfileScreen() {
             )}
           </View>
         </View>
+
+        {/* Enhanced Profile Fields */}
+        <View style={[styles.card, { marginTop: SPACING.md }]}>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>אודות</Text>
+            {editing ? (
+              <TextInput
+                style={[styles.fieldInput, { minHeight: 60 }]}
+                value={bio}
+                onChangeText={setBio}
+                textAlign="right"
+                multiline
+                placeholder="ספר על עצמך..."
+                placeholderTextColor={COLORS.grayLight}
+              />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.bio || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>ישוב מגורים</Text>
+            {editing ? (
+              <TextInput style={styles.fieldInput} value={settlement} onChangeText={setSettlement} textAlign="right" placeholder="למשל: צפת, כרמיאל..." placeholderTextColor={COLORS.grayLight} />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.settlement || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>עיר מוצא</Text>
+            {editing ? (
+              <TextInput style={styles.fieldInput} value={originCity} onChangeText={setOriginCity} textAlign="right" placeholder="העיר שגדלת בה..." placeholderTextColor={COLORS.grayLight} />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.origin_city || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>טלפון</Text>
+            {editing ? (
+              <TextInput style={styles.fieldInput} value={phone} onChangeText={setPhone} textAlign="right" keyboardType="phone-pad" placeholder="050-..." placeholderTextColor={COLORS.grayLight} />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.phone || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>מסלול / התמחות</Text>
+            {editing ? (
+              <TextInput style={styles.fieldInput} value={academicTrack} onChangeText={setAcademicTrack} textAlign="right" placeholder="למשל: כירורגיה, פנימית..." placeholderTextColor={COLORS.grayLight} />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.academic_track || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>מצב משפחתי</Text>
+            {editing ? (
+              <View style={styles.yearRow}>
+                {([['single', 'רווק/ה'], ['in_relationship', 'בזוגיות'], ['married', 'נשוי/אה']] as const).map(([value, label]) => (
+                  <TouchableOpacity
+                    key={value}
+                    style={[styles.yearChip, maritalStatus === value && styles.yearChipActive]}
+                    onPress={() => setMaritalStatus(value)}
+                  >
+                    <Text style={[styles.yearChipText, maritalStatus === value && styles.yearChipTextActive]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.fieldValue}>
+                {maritalStatus === 'married' ? 'נשוי/אה' : maritalStatus === 'in_relationship' ? 'בזוגיות' : 'רווק/ה'}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Tag Subscriptions */}
+        <View style={[styles.card, { marginTop: SPACING.md }]}>
+          <TagSelector
+            label="תיוגים שאני עוקב/ת אחריהם"
+            allTags={allTags}
+            selectedTags={subscribedTags}
+            onToggleTag={(tagId) => {
+              if (subscribedTags.some((t) => t.id === tagId)) {
+                unsubscribeFromTag(tagId);
+              } else {
+                subscribeToTag(tagId);
+              }
+            }}
+            onCreateTag={createTag}
+          />
+        </View>
+
+        {/* Profile Completeness */}
+        {user?.profile_completeness !== undefined && user.profile_completeness < 100 && (
+          <View style={[styles.card, { marginTop: SPACING.md }]}>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>השלמת פרופיל</Text>
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${user.profile_completeness}%` }]} />
+              </View>
+              <Text style={[styles.fieldValue, { fontSize: 13, marginTop: 4 }]}>
+                {user.profile_completeness}% — מלא את הפרופיל כדי שהצ'אט יכיר אותך טוב יותר
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Role Badge */}
         <View style={styles.roleCard}>
@@ -693,5 +839,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.red,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 8,
+    backgroundColor: COLORS.grayLight,
+    borderRadius: 4,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 4,
   },
 });
