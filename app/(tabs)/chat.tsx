@@ -22,7 +22,7 @@ import type { MeditMessage } from '../../src/types/database';
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { messages, loading, sendMessage, clearChat } = useMeditStore();
+  const { messages, loading, sendMessage, startNewSession } = useMeditStore();
   const { user } = useAuthStore();
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -109,7 +109,7 @@ export default function ChatScreen() {
           <TouchableOpacity onPress={() => setShowHistory(true)}>
             <Ionicons name="time-outline" size={22} color={COLORS.gray} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={clearChat}>
+          <TouchableOpacity onPress={startNewSession}>
             <Ionicons name="add-outline" size={24} color={COLORS.gray} />
           </TouchableOpacity>
         </View>
