@@ -143,7 +143,11 @@ serve(async (req) => {
 
     // --- 4 parallel context queries ---
     const [profileRes, tagsRes, activityRes, pendingRes] = await Promise.all([
-      supabase.from('users').select('*').eq('id', user.id).single(),
+      supabase
+        .from('users')
+        .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id')
+        .eq('id', user.id)
+        .single(),
       supabase
         .from('user_tag_subscriptions')
         .select('tag_id, tag:bridge_tags(name)')
@@ -159,7 +163,8 @@ serve(async (req) => {
         .select('title, due_date')
         .eq('user_id', user.id)
         .eq('status', 'pending')
-        .order('due_date', { ascending: true, nullsFirst: false }),
+        .order('due_date', { ascending: true, nullsFirst: false })
+        .limit(10),
     ]);
 
     const tagIds = (tagsRes.data || []).map((t: any) => t.tag_id);
@@ -214,6 +219,12 @@ serve(async (req) => {
         messages: (messages as any[]).slice(-15),
       }),
     });
+
+    if (!claudeResponse.ok) {
+      const errText = await claudeResponse.text();
+      console.error('Claude API error:', claudeResponse.status, errText);
+      throw new Error(`Claude API returned ${claudeResponse.status}`);
+    }
 
     const claudeData = await claudeResponse.json();
     const assistantResponse = claudeData.content?.[0]?.text || 'מצטער, לא הצלחתי לעבד את הבקשה.';
