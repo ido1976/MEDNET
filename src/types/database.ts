@@ -230,6 +230,7 @@ export interface MeditMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  session_id?: string;
 }
 
 export interface SecondhandListing {
@@ -336,4 +337,11 @@ export interface ChatInteraction {
   response_helpful: boolean | null;
   session_id: string | null;
   created_at: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string | null;
+  started_at: string;
+  last_message_at: string;
 }
