@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import type { MeditMessage, ChatSession } from '../types/database';
-import { v4 as uuid } from 'uuid';
+const uuid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 const STORAGE_KEY = 'chatmed_current_session';
 
