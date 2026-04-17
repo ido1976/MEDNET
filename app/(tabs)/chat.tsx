@@ -18,18 +18,36 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useMeditStore } from '../../src/stores/meditStore';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useNotificationStore } from '../../src/stores/notificationStore';
 import type { MeditMessage } from '../../src/types/database';
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { messages, loading, sendMessage, startNewSession } = useMeditStore();
+  const {
+    messages,
+    loading,
+    sessions,
+    sendMessage,
+    startNewSession,
+    loadLastSession,
+    loadSession,
+    fetchSessions,
+  } = useMeditStore();
   const { user } = useAuthStore();
+  const { pendingActions, fetchPendingActions } = useNotificationStore();
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const firstName = user?.full_name?.split(' ')[0] || '';
 
+  // Load last session + pending actions on mount
+  useEffect(() => {
+    loadLastSession();
+    fetchPendingActions();
+  }, []);
+
+  // Scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => {
@@ -42,6 +60,21 @@ export default function ChatScreen() {
     if (!input.trim() || loading) return;
     sendMessage(input.trim());
     setInput('');
+  };
+
+  const handleOpenHistory = () => {
+    fetchSessions();
+    setShowHistory(true);
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    loadSession(sessionId);
+    setShowHistory(false);
+  };
+
+  const handleNewSession = () => {
+    startNewSession();
+    setShowHistory(false);
   };
 
   const renderMessage = ({ item }: { item: MeditMessage }) => {
@@ -60,23 +93,16 @@ export default function ChatScreen() {
     );
   };
 
-  // Group messages into conversations by time gaps (>30 min = new conversation)
-  const getConversationPreviews = () => {
-    if (messages.length === 0) return [];
-    const conversations: { firstMsg: string; timestamp: number; count: number }[] = [];
-    let currentConv = { firstMsg: '', timestamp: 0, count: 0 };
-
-    messages.forEach((msg, i) => {
-      if (i === 0 || msg.timestamp - messages[i - 1].timestamp > 30 * 60 * 1000) {
-        if (currentConv.count > 0) conversations.push(currentConv);
-        const preview = msg.role === 'user' ? msg.content : messages[i + 1]?.content || msg.content;
-        currentConv = { firstMsg: preview.slice(0, 60), timestamp: msg.timestamp, count: 1 };
-      } else {
-        currentConv.count++;
-      }
-    });
-    if (currentConv.count > 0) conversations.push(currentConv);
-    return conversations.reverse();
+  // Proactive greeting: mention first pending action if available
+  const getGreetingText = () => {
+    if (pendingActions.length > 0) {
+      const next = pendingActions[0];
+      const dueStr = next.due_date
+        ? ` עד ${new Date(next.due_date).toLocaleDateString('he-IL')}`
+        : '';
+      return `אהלן${firstName ? ` ${firstName}` : ''}! יש לך "${next.title}"${dueStr}. רוצה שנעשה את זה יחד?`;
+    }
+    return `אהלן${firstName ? ` ${firstName}` : ''}, מה מתחשק לך לעשות היום ביחד?`;
   };
 
   const renderWelcome = () => (
@@ -85,11 +111,8 @@ export default function ChatScreen() {
         <Text style={styles.welcomeFlower}>🌸</Text>
       </View>
       <Text style={styles.welcomeTitle}>CHATMED</Text>
-
       <View style={styles.greetingCard}>
-        <Text style={styles.greetingText}>
-          אהלן{firstName ? ` ${firstName}` : ''}, מה מתחשק לך לעשות היום ביחד?
-        </Text>
+        <Text style={styles.greetingText}>{getGreetingText()}</Text>
       </View>
     </View>
   );
@@ -106,7 +129,7 @@ export default function ChatScreen() {
           <Text style={styles.headerText}>CHATMED</Text>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => setShowHistory(true)}>
+          <TouchableOpacity onPress={handleOpenHistory}>
             <Ionicons name="time-outline" size={22} color={COLORS.gray} />
           </TouchableOpacity>
           <TouchableOpacity onPress={startNewSession}>
@@ -120,7 +143,7 @@ export default function ChatScreen() {
         style={styles.flex}
         keyboardVerticalOffset={0}
       >
-        {/* Messages */}
+        {/* Messages or Welcome screen */}
         {messages.length === 0 ? (
           renderWelcome()
         ) : (
@@ -178,28 +201,33 @@ export default function ChatScreen() {
                 <Ionicons name="close" size={24} color={COLORS.gray} />
               </TouchableOpacity>
               <Text style={styles.historyTitle}>היסטוריית שיחות</Text>
-              <View style={{ width: 24 }} />
+              <TouchableOpacity onPress={handleNewSession} style={styles.newSessionBtn}>
+                <Ionicons name="add" size={20} color={COLORS.primary} />
+                <Text style={styles.newSessionText}>שיחה חדשה</Text>
+              </TouchableOpacity>
             </View>
             <ScrollView contentContainerStyle={styles.historyList}>
-              {getConversationPreviews().length === 0 ? (
+              {sessions.length === 0 ? (
                 <View style={styles.historyEmpty}>
                   <Ionicons name="chatbubbles-outline" size={40} color={COLORS.grayLight} />
                   <Text style={styles.historyEmptyText}>אין שיחות קודמות</Text>
                 </View>
               ) : (
-                getConversationPreviews().map((conv, i) => (
+                sessions.map((session) => (
                   <TouchableOpacity
-                    key={i}
+                    key={session.id}
                     style={styles.historyItem}
-                    onPress={() => setShowHistory(false)}
+                    onPress={() => handleSelectSession(session.id)}
                   >
                     <View style={styles.historyItemIcon}>
                       <Ionicons name="chatbubble-outline" size={18} color={COLORS.primary} />
                     </View>
                     <View style={styles.historyItemInfo}>
-                      <Text style={styles.historyItemText} numberOfLines={1}>{conv.firstMsg}</Text>
+                      <Text style={styles.historyItemText} numberOfLines={1}>
+                        {session.title || 'שיחה ללא כותרת'}
+                      </Text>
                       <Text style={styles.historyItemMeta}>
-                        {conv.count} הודעות · {new Date(conv.timestamp).toLocaleDateString('he-IL')}
+                        {new Date(session.last_message_at).toLocaleDateString('he-IL')}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -396,7 +424,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 28,
   },
-  // History modal
   historyOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -420,6 +447,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: COLORS.primaryDark,
+  },
+  newSessionBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+  },
+  newSessionText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '600',
   },
   historyList: {
     padding: SPACING.lg,
