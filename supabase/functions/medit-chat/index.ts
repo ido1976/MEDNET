@@ -252,7 +252,9 @@ serve(async (req) => {
     // Admin client: only for auth.getUser() — service role needed to verify JWT
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const token = authHeader.replace('Bearer ', '');
+    console.log('[auth] header present:', !!authHeader, '| token prefix:', token.slice(0, 20));
     const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
+    console.log('[auth] getUser result — user:', user?.id || 'null', '| error:', authError?.message || 'none');
 
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
