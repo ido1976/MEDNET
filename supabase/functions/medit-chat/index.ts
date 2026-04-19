@@ -440,30 +440,103 @@ serve(async (req) => {
       missingFields
     );
 
-    // --- 7. Call Claude API ---
-    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: safeMsgs,
-      }),
-    });
+    // --- 7. Call Claude API (with tool_use support) ---
+    const callClaude = async (messages: any[]): Promise<any> => {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': CLAUDE_API_KEY!,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+          system: systemPrompt,
+          tools: missingFields.length > 0 ? [PROFILE_COMPLETION_TOOL] : undefined,
+          messages,
+        }),
+      });
 
-    if (!claudeResponse.ok) {
-      const errText = await claudeResponse.text();
-      console.error('Claude API error:', claudeResponse.status, errText);
-      throw new Error(`Claude API returned ${claudeResponse.status}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('Claude API error:', res.status, errText);
+        throw new Error(`Claude API returned ${res.status}`);
+      }
+
+      return res.json();
+    };
+
+    // Allowed fields whitelist with sanitizers — prevents arbitrary column writes
+    const ALLOWED_SAVE_FIELDS: Record<string, (v: any) => any> = {
+      marital_status: (v: any) => ['single', 'in_relationship', 'married'].includes(v) ? v : null,
+      has_children: (v: any) => typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : null,
+      children_ages: (v: any) => Array.isArray(v) ? v.map(Number).filter((n: number) => !isNaN(n)) : null,
+      bio: (v: any) => typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null,
+      graduation_year: (v: any) => {
+        const n = parseInt(v, 10);
+        return n >= 2024 && n <= 2040 ? n : null;
+      },
+      phone: (v: any) => typeof v === 'string' && v.trim() ? v.trim().slice(0, 20) : null,
+    };
+
+    let conversationMessages = [...safeMsgs];
+    let claudeData = await callClaude(conversationMessages);
+    let assistantResponse = '';
+
+    // Handle tool_use round-trip (Claude may call save_profile_field)
+    while (claudeData.stop_reason === 'tool_use') {
+      const toolUseBlock = claudeData.content.find((b: any) => b.type === 'tool_use');
+      if (!toolUseBlock) break;
+
+      let toolResult = 'saved';
+
+      if (toolUseBlock.name === 'save_profile_field') {
+        const { field, value } = toolUseBlock.input || {};
+        const sanitizer = ALLOWED_SAVE_FIELDS[field];
+
+        if (sanitizer) {
+          const sanitized = sanitizer(value);
+          if (sanitized !== null) {
+            const { error: saveError } = await adminClient
+              .from('users')
+              .update({ [field]: sanitized })
+              .eq('id', user.id);
+
+            if (saveError) {
+              console.error(`Failed to save profile field ${field}:`, saveError);
+              toolResult = 'error saving field';
+            }
+          } else {
+            toolResult = 'invalid value — skipped';
+          }
+        } else {
+          toolResult = 'unknown field — skipped';
+        }
+      }
+
+      // Send tool_result back to Claude and get next response
+      conversationMessages = [
+        ...conversationMessages,
+        { role: 'assistant', content: claudeData.content },
+        {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseBlock.id,
+            content: toolResult,
+          }],
+        },
+      ];
+
+      claudeData = await callClaude(conversationMessages);
     }
 
-    const claudeData = await claudeResponse.json();
-    const assistantResponse = claudeData.content?.[0]?.text || 'מצטער, לא הצלחתי לעבד את הבקשה.';
+    // Extract final text response
+    assistantResponse = claudeData.content
+      ?.filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
+      .join('') || 'מצטער, לא הצלחתי לעבד את הבקשה.';
 
     // --- 8. Persist assistant message + update session ---
     if (session_id) {
