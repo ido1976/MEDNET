@@ -22,10 +22,19 @@ import { useBridgeStore } from '../../src/stores/bridgeStore';
 import { useFriendStore } from '../../src/stores/friendStore';
 import { getInitials, YEAR_LABELS, INTEREST_OPTIONS } from '../../src/lib/helpers';
 import type { User, Friendship } from '../../src/types/database';
+import { supabase } from '../../src/lib/supabase';
+
+const LANGUAGE_OPTIONS = [
+  'עברית', 'אנגלית', 'ערבית', 'רוסית', 'צרפתית', 'ספרדית', 'אמהרית', 'גרוזינית',
+];
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, updateProfile, signOut, subscribedTags, subscribeToTag, unsubscribeFromTag } = useAuthStore();
+  const {
+    user, updateProfile, signOut,
+    subscribedTags, subscribeToTag, unsubscribeFromTag,
+    sendPartnerRequest, acceptPartnerRequest,
+  } = useAuthStore();
   const { allTags, fetchAllTags, createTag } = useBridgeStore();
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -44,6 +53,21 @@ export default function ProfileScreen() {
     user?.marital_status || 'single'
   );
 
+  // Missing profile fields
+  const [graduationYear, setGraduationYear] = useState<string>(
+    user?.graduation_year?.toString() || ''
+  );
+  const [languages, setLanguages] = useState<string[]>(user?.languages || ['עברית']);
+  const [hasChildren, setHasChildren] = useState<boolean>(user?.has_children || false);
+  const [childrenAges, setChildrenAges] = useState<string>(
+    user?.children_ages?.join(', ') || ''
+  );
+
+  // Couple sync
+  const [partnerSearch, setPartnerSearch] = useState('');
+  const [partnerUser, setPartnerUser] = useState<User | null>(null);
+  const [incomingPartnerRequests, setIncomingPartnerRequests] = useState<any[]>([]);
+
   // Friends
   const {
     friends, incomingRequests, searchResults, loading: friendsLoading,
@@ -55,9 +79,73 @@ export default function ProfileScreen() {
     if (user?.id) {
       fetchFriends(user.id);
       fetchRequests(user.id);
+      fetchPartnerData(user.id);
     }
     fetchAllTags();
   }, [user?.id]);
+
+  const fetchPartnerData = async (userId: string) => {
+    if (user?.partner_user_id) {
+      const { data } = await supabase
+        .from('users')
+        .select('id, full_name, avatar_url, year_of_study')
+        .eq('id', user.partner_user_id)
+        .single();
+      if (data) setPartnerUser(data as User);
+    }
+
+    const { data: reqs } = await supabase
+      .from('notifications')
+      .select('id, reference_id')
+      .eq('user_id', userId)
+      .eq('type', 'partner_request')
+      .eq('is_read', false);
+
+    if (reqs && reqs.length > 0) {
+      const requesterIds = reqs.map((r: any) => r.reference_id);
+      const { data: requesters } = await supabase
+        .from('users')
+        .select('id, full_name, avatar_url')
+        .in('id', requesterIds);
+
+      setIncomingPartnerRequests(
+        reqs.map((r: any) => ({
+          notificationId: r.id,
+          requesterId: r.reference_id,
+          requester: requesters?.find((u: any) => u.id === r.reference_id) || null,
+        }))
+      );
+    }
+  };
+
+  const handlePartnerSearch = (text: string) => {
+    setPartnerSearch(text);
+    if (user?.id) searchUsers(text, user.id);
+  };
+
+  const handleSendPartnerRequest = async (targetUserId: string) => {
+    const { error } = await sendPartnerRequest(targetUserId);
+    if (error) {
+      Alert.alert('שגיאה', error);
+    } else {
+      Alert.alert('נשלח!', 'בקשת שיוך זוגי נשלחה');
+      setPartnerSearch('');
+    }
+  };
+
+  const handleAcceptPartnerRequest = async (notificationId: string, requesterId: string) => {
+    const { error } = await acceptPartnerRequest(requesterId);
+    if (error) {
+      Alert.alert('שגיאה', error);
+    } else {
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+      setIncomingPartnerRequests([]);
+      if (user?.id) fetchPartnerData(user.id);
+    }
+  };
 
   const handleFriendSearch = (text: string) => {
     setFriendSearch(text);
@@ -111,10 +199,23 @@ export default function ProfileScreen() {
       setAcademicTrack(user.academic_track || '');
       setOriginCity(user.origin_city || '');
       setMaritalStatus(user.marital_status || 'single');
+      setGraduationYear(user.graduation_year?.toString() || '');
+      setLanguages(user.languages || ['עברית']);
+      setHasChildren(user.has_children || false);
+      setChildrenAges(user.children_ages?.join(', ') || '');
     }
-  }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type, user?.bio, user?.settlement]);
+  }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type,
+      user?.bio, user?.settlement, user?.graduation_year, user?.languages?.length,
+      user?.has_children, user?.children_ages?.length]);
 
   const handleSave = async () => {
+    const parsedChildrenAges = hasChildren && childrenAges.trim()
+      ? childrenAges
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => !isNaN(n))
+      : [];
+
     const { error } = await updateProfile({
       full_name: fullName,
       year_of_study: yearOfStudy,
@@ -126,6 +227,10 @@ export default function ProfileScreen() {
       academic_track: academicTrack,
       origin_city: originCity,
       marital_status: maritalStatus,
+      graduation_year: graduationYear ? parseInt(graduationYear, 10) : null,
+      languages,
+      has_children: hasChildren,
+      children_ages: parsedChildrenAges,
     } as any);
     if (error) {
       Alert.alert('שגיאה', error);
@@ -390,6 +495,111 @@ export default function ProfileScreen() {
               </Text>
             )}
           </View>
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>שנת סיום לימודים (משוערת)</Text>
+            {editing ? (
+              <TextInput
+                style={styles.fieldInput}
+                value={graduationYear}
+                onChangeText={setGraduationYear}
+                textAlign="right"
+                keyboardType="numeric"
+                placeholder="לדוגמה: 2028"
+                placeholderTextColor={COLORS.grayLight}
+                maxLength={4}
+              />
+            ) : (
+              <Text style={styles.fieldValue}>{user?.graduation_year || '-'}</Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>שפות</Text>
+            {editing ? (
+              <View style={styles.yearRow}>
+                {LANGUAGE_OPTIONS.map((lang) => (
+                  <TouchableOpacity
+                    key={lang}
+                    style={[styles.yearChip, languages.includes(lang) && styles.yearChipActive]}
+                    onPress={() =>
+                      setLanguages((prev) =>
+                        prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.yearChipText,
+                        languages.includes(lang) && styles.yearChipTextActive,
+                      ]}
+                    >
+                      {lang}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.fieldValue}>
+                {user?.languages?.length ? user.languages.join(', ') : 'לא צוין'}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>ילדים</Text>
+            {editing ? (
+              <View style={styles.yearRow}>
+                <TouchableOpacity
+                  style={[styles.yearChip, hasChildren && styles.yearChipActive]}
+                  onPress={() => setHasChildren(true)}
+                >
+                  <Text style={[styles.yearChipText, hasChildren && styles.yearChipTextActive]}>
+                    יש ילדים
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.yearChip, !hasChildren && styles.yearChipActive]}
+                  onPress={() => setHasChildren(false)}
+                >
+                  <Text style={[styles.yearChipText, !hasChildren && styles.yearChipTextActive]}>
+                    אין ילדים
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.fieldValue}>{user?.has_children ? 'יש ילדים' : 'אין ילדים'}</Text>
+            )}
+          </View>
+
+          {(editing ? hasChildren : user?.has_children) && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>גילאי ילדים (מופרדים בפסיק)</Text>
+                {editing ? (
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={childrenAges}
+                    onChangeText={setChildrenAges}
+                    textAlign="right"
+                    keyboardType="numeric"
+                    placeholder="לדוגמה: 3, 7, 12"
+                    placeholderTextColor={COLORS.grayLight}
+                  />
+                ) : (
+                  <Text style={styles.fieldValue}>
+                    {user?.children_ages?.length ? user.children_ages.join(', ') : '-'}
+                  </Text>
+                )}
+              </View>
+            </>
+          )}
         </View>
 
         {/* Tag Subscriptions */}
@@ -407,6 +617,111 @@ export default function ProfileScreen() {
             }}
             onCreateTag={createTag}
           />
+        </View>
+
+        {/* Couple Sync */}
+        <View style={[styles.card, { marginTop: SPACING.md }]}>
+          <Text style={styles.friendsSectionTitle}>שיוך זוגי</Text>
+
+          {user?.partner_user_id && partnerUser ? (
+            <View style={styles.friendRow}>
+              {partnerUser.avatar_url ? (
+                <Image source={{ uri: partnerUser.avatar_url }} style={styles.friendAvatar} />
+              ) : (
+                <View style={styles.friendAvatarPlaceholder}>
+                  <Text style={styles.friendAvatarText}>
+                    {getInitials(partnerUser.full_name || '?')}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.friendInfo}>
+                <Text style={styles.friendName}>{partnerUser.full_name}</Text>
+                <Text style={{ fontSize: 12, color: COLORS.gray, textAlign: 'right' }}>
+                  {partnerUser.year_of_study ? YEAR_LABELS[partnerUser.year_of_study] : ''}
+                </Text>
+              </View>
+              <Ionicons name="heart" size={20} color={COLORS.accent} />
+            </View>
+          ) : (
+            <>
+              {incomingPartnerRequests.length > 0 && (
+                <View style={{ marginBottom: SPACING.sm }}>
+                  <Text style={styles.requestsTitle}>
+                    בקשות שיוך זוגי ({incomingPartnerRequests.length})
+                  </Text>
+                  {incomingPartnerRequests.map((req) => (
+                    <View key={req.notificationId} style={styles.friendRow}>
+                      <TouchableOpacity
+                        style={styles.acceptBtn}
+                        onPress={() =>
+                          handleAcceptPartnerRequest(req.notificationId, req.requesterId)
+                        }
+                      >
+                        <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                      </TouchableOpacity>
+                      <View style={styles.friendInfo}>
+                        <Text style={styles.friendName}>
+                          {req.requester?.full_name || 'משתמש'}
+                        </Text>
+                      </View>
+                      {req.requester?.avatar_url ? (
+                        <Image
+                          source={{ uri: req.requester.avatar_url }}
+                          style={styles.friendAvatar}
+                        />
+                      ) : (
+                        <View style={styles.friendAvatarPlaceholder}>
+                          <Text style={styles.friendAvatarText}>
+                            {getInitials(req.requester?.full_name || '?')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <Text style={{ fontSize: 13, color: COLORS.gray, textAlign: 'right', marginBottom: SPACING.sm }}>
+                חפש את השותף/ה שלך לשיוך הפרופילים
+              </Text>
+              <View style={styles.friendSearchRow}>
+                <Ionicons name="search" size={18} color={COLORS.gray} />
+                <TextInput
+                  style={styles.friendSearchInput}
+                  placeholder="חפש לפי שם..."
+                  placeholderTextColor={COLORS.grayLight}
+                  value={partnerSearch}
+                  onChangeText={handlePartnerSearch}
+                  textAlign="right"
+                />
+              </View>
+
+              {partnerSearch.length > 0 && searchResults.length > 0 && (
+                <View style={styles.searchResultsList}>
+                  {searchResults.map((u) => (
+                    <View key={u.id} style={styles.friendRow}>
+                      <TouchableOpacity
+                        style={styles.addFriendBtn}
+                        onPress={() => handleSendPartnerRequest(u.id)}
+                      >
+                        <Ionicons name="heart-outline" size={16} color={COLORS.primary} />
+                      </TouchableOpacity>
+                      <View style={styles.friendInfo}>
+                        <Text style={styles.friendName}>{u.full_name}</Text>
+                      </View>
+                      {u.avatar_url ? (
+                        <Image source={{ uri: u.avatar_url }} style={styles.friendAvatar} />
+                      ) : (
+                        <View style={styles.friendAvatarPlaceholder}>
+                          <Text style={styles.friendAvatarText}>{getInitials(u.full_name)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
         </View>
 
         {/* Profile Completeness */}
