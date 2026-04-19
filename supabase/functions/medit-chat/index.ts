@@ -441,7 +441,18 @@ serve(async (req) => {
     );
 
     // --- 7. Call Claude API (with tool_use support) ---
+    console.log('[medit-chat] missingFields count:', missingFields.length, 'isNewSession:', !!is_new_session);
+
     const callClaude = async (messages: any[]): Promise<any> => {
+      const requestBody = {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: missingFields.length > 0 ? [PROFILE_COMPLETION_TOOL] : undefined,
+        messages,
+      };
+      console.log('[medit-chat] calling Claude, messages count:', messages.length, 'tools:', requestBody.tools ? 'yes' : 'no');
+
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -449,19 +460,13 @@ serve(async (req) => {
           'x-api-key': CLAUDE_API_KEY!,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1024,
-          system: systemPrompt,
-          tools: missingFields.length > 0 ? [PROFILE_COMPLETION_TOOL] : undefined,
-          messages,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        console.error('Claude API error:', res.status, errText);
-        throw new Error(`Claude API returned ${res.status}`);
+        console.error('[medit-chat] Claude API error:', res.status, errText);
+        throw new Error(`Claude API returned ${res.status}: ${errText.slice(0, 200)}`);
       }
 
       return res.json();
