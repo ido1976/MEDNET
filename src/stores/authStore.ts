@@ -201,10 +201,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!session?.user) return;
 
     try {
-      await supabase.from('user_tag_subscriptions').insert({
-        user_id: session.user.id,
-        tag_id: tagId,
-      });
+      await supabase.from('user_tag_subscriptions').upsert(
+        { user_id: session.user.id, tag_id: tagId },
+        { onConflict: 'user_id,tag_id', ignoreDuplicates: true }
+      );
       await get().fetchSubscribedTags();
     } catch (e) {}
   },

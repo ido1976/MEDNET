@@ -66,7 +66,11 @@ export default function ProfileScreen() {
   // Couple sync
   const [partnerSearch, setPartnerSearch] = useState('');
   const [partnerUser, setPartnerUser] = useState<User | null>(null);
-  const [incomingPartnerRequests, setIncomingPartnerRequests] = useState<any[]>([]);
+  const [incomingPartnerRequests, setIncomingPartnerRequests] = useState<{
+    notificationId: string;
+    requesterId: string;
+    requester: { id: string; full_name: string; avatar_url: string | null } | null;
+  }[]>([]);
 
   // Friends
   const {
@@ -99,7 +103,7 @@ export default function ProfileScreen() {
       .select('id, reference_id')
       .eq('user_id', userId)
       .eq('type', 'partner_request')
-      .eq('is_read', false);
+      .eq('read', false);
 
     if (reqs && reqs.length > 0) {
       const requesterIds = reqs.map((r: any) => r.reference_id);
@@ -123,14 +127,26 @@ export default function ProfileScreen() {
     if (user?.id) searchUsers(text, user.id);
   };
 
-  const handleSendPartnerRequest = async (targetUserId: string) => {
-    const { error } = await sendPartnerRequest(targetUserId);
-    if (error) {
-      Alert.alert('שגיאה', error);
-    } else {
-      Alert.alert('נשלח!', 'בקשת שיוך זוגי נשלחה');
-      setPartnerSearch('');
-    }
+  const handleSendPartnerRequest = async (targetUserId: string, targetName: string) => {
+    Alert.alert(
+      'שיוך זוגי',
+      `לשייך את הפרופיל שלך עם ${targetName}?`,
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'שלח בקשה',
+          onPress: async () => {
+            const { error } = await sendPartnerRequest(targetUserId);
+            if (error) {
+              Alert.alert('שגיאה', error);
+            } else {
+              Alert.alert('נשלח!', 'בקשת שיוך זוגי נשלחה');
+              setPartnerSearch('');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleAcceptPartnerRequest = async (notificationId: string, requesterId: string) => {
@@ -140,7 +156,7 @@ export default function ProfileScreen() {
     } else {
       await supabase
         .from('notifications')
-        .update({ is_read: true })
+        .update({ read: true })
         .eq('id', notificationId);
       setIncomingPartnerRequests([]);
       if (user?.id) fetchPartnerData(user.id);
@@ -702,7 +718,7 @@ export default function ProfileScreen() {
                     <View key={u.id} style={styles.friendRow}>
                       <TouchableOpacity
                         style={styles.addFriendBtn}
-                        onPress={() => handleSendPartnerRequest(u.id)}
+                        onPress={() => handleSendPartnerRequest(u.id, u.full_name)}
                       >
                         <Ionicons name="heart-outline" size={16} color={COLORS.primary} />
                       </TouchableOpacity>

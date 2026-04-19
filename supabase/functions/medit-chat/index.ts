@@ -245,7 +245,7 @@ serve(async (req) => {
     }
 
     // --- 5. Parallel context queries (via userClient — RLS enforced) ---
-    const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes] = await Promise.all([
+    const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes, recentChatsRes] = await Promise.all([
       userClient
         .from('users')
         .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id, bio, interests')
@@ -278,6 +278,12 @@ serve(async (req) => {
         .from('user_circle_members')
         .select('circle:user_circles(name)')
         .eq('user_id', user.id),
+      userClient
+        .from('chat_interactions')
+        .select('question')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5),
     ]);
 
     // Resolve partner first name (only if linked)
@@ -290,14 +296,6 @@ serve(async (req) => {
         .single();
       partnerName = partnerData?.full_name?.split(' ')[0] || null;
     }
-
-    // Recent chat topics the user has asked about
-    const { data: recentChatsData } = await userClient
-      .from('chat_interactions')
-      .select('question')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(5);
 
     const tagIds = (tagsRes.data || []).map((t: any) => t.tag_id);
     const tagNames = (tagsRes.data || [])
@@ -331,7 +329,7 @@ serve(async (req) => {
       circles: (circlesRes.data || [])
         .map((c: any) => c.circle?.name)
         .filter(Boolean) as string[],
-      recentChatTopics: (recentChatsData || [])
+      recentChatTopics: (recentChatsRes.data || [])
         .map((c: any) => c.question?.slice(0, 80))
         .filter(Boolean) as string[],
       partnerName,

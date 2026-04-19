@@ -50,13 +50,16 @@ export default function OnboardingScreen() {
   // Step 6 — Avatar
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
+  const [dbTagsError, setDbTagsError] = useState(false);
+
   // Fetch real tags from DB on mount
   useEffect(() => {
     supabase
       .from('bridge_tags')
       .select('id, name')
       .order('name')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { setDbTagsError(true); return; }
         if (data) setDbTags(data as BridgeTag[]);
       });
   }, []);
@@ -267,7 +270,9 @@ export default function OnboardingScreen() {
             <Text style={styles.stepTitle}>תיוגים</Text>
             <Text style={styles.stepDesc}>באילו גשרים תרצה להשתתף?</Text>
             <View style={styles.chipsGrid}>
-              {dbTags.length === 0 ? (
+              {dbTagsError ? (
+                <Text style={styles.emptyTagsText}>לא ניתן לטעון תיוגים — ניתן לדלג</Text>
+              ) : dbTags.length === 0 ? (
                 <Text style={styles.emptyTagsText}>טוען תיוגים...</Text>
               ) : (
                 dbTags.map((tag) => (

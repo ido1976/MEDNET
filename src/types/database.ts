@@ -85,7 +85,7 @@ export interface BridgeAddition {
 export interface Notification {
   id: string;
   user_id: string;
-  type: 'addition_pending' | 'addition_approved' | 'addition_rejected';
+  type: 'addition_pending' | 'addition_approved' | 'addition_rejected' | 'partner_request' | 'partner_accepted';
   reference_id: string;
   bridge_id: string;
   read: boolean;
