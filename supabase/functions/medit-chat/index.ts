@@ -150,7 +150,8 @@ ${recentTopicsList}
 4. ענה רק על מידע שקיים ב-MEDNET — אל תמציא
 5. שמור על טון חם, ישיר, כמו חבר קרוב — לא פורמלי
 6. דבר עברית בלבד
-7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים${newSessionInstruction}${profileCompletionSection}`;
+7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים
+8. אם המשתמש מבקש לעדכן פרט בפרופיל (כגון מצב משפחתי, ביוגרפיה, טלפון וכד') — קרא ל-save_profile_field מיד${newSessionInstruction}${profileCompletionSection}`;
 }
 
 // Simple tag extraction: find known tag names that appear in the user's question
@@ -446,7 +447,7 @@ serve(async (req) => {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
-        tools: missingFields.length > 0 ? [PROFILE_COMPLETION_TOOL] : undefined,
+        tools: [PROFILE_COMPLETION_TOOL],
         messages,
       };
 
