@@ -86,31 +86,39 @@ export default function ApartmentsScreen() {
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!newAddress.trim()) { Alert.alert('שגיאה', 'נא להזין כתובת'); return; }
     if (!newPrice.trim()) { Alert.alert('שגיאה', 'נא להזין מחיר'); return; }
     if (!newRooms.trim()) { Alert.alert('שגיאה', 'נא להזין מספר חדרים'); return; }
 
-    const newApt: Apartment = {
-      id: Date.now().toString(),
-      address: newAddress ? `${newAddress}, ${newSettlement}` : newSettlement,
-      description: newDesc || newTitle,
-      price: Number(newPrice),
-      rooms: Number(newRooms),
-      floor: newFloor ? Number(newFloor) : 0,
-      is_furnished: newFurnished,
-      has_balcony: newBalcony,
-      has_parking: newParking,
-      pets_allowed: newPets,
-      landlord_rating: 0,
-      available_from: newAvailableFrom || new Date().toISOString(),
-      contact_phone: newPhone,
-      images: newImages,
-      created_by: '',
-      created_at: new Date().toISOString(),
-    } as Apartment;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) { Alert.alert('שגיאה', 'יש להתחבר קודם'); return; }
 
-    setApartments((prev) => [newApt, ...prev]);
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('apartments')
+      .insert({
+        created_by: session.user.id,
+        address: newAddress ? `${newAddress}, ${newSettlement}` : newSettlement,
+        description: newDesc || newTitle,
+        price: Number(newPrice),
+        rooms: Number(newRooms),
+        floor: newFloor ? Number(newFloor) : 0,
+        is_furnished: newFurnished,
+        has_balcony: newBalcony,
+        has_parking: newParking,
+        pets_allowed: newPets,
+        landlord_rating: 0,
+        available_from: newAvailableFrom || new Date().toISOString(),
+        contact_phone: newPhone,
+        images: [],
+      })
+      .select('*, contact_user:users(full_name, avatar_url)')
+      .single();
+    setLoading(false);
+
+    if (error) { Alert.alert('שגיאה', 'לא ניתן לפרסם את הדירה'); return; }
+    setApartments((prev) => [data as Apartment, ...prev]);
     setShowCreate(false);
     resetForm();
     Alert.alert('פורסם!', 'הדירה פורסמה בהצלחה');

@@ -65,26 +65,32 @@ export default function PricesScreen() {
     setLoading(false);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!newItem.trim()) { Alert.alert('שגיאה', 'נא להזין שם מוצר'); return; }
     if (!newPrice.trim()) { Alert.alert('שגיאה', 'נא להזין מחיר'); return; }
 
-    const storeName = newStore;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) { Alert.alert('שגיאה', 'יש להתחבר קודם'); return; }
 
-    const newPriceItem: Price = {
-      id: Date.now().toString(),
-      item_name: newItem,
-      price: Number(newPrice),
-      store: storeName,
-      category: newCategory,
-      reliability_score: 85,
-      reported_at: new Date().toISOString(),
-      reported_by: '',
-      notes: newNotes,
-      created_at: new Date().toISOString(),
-    } as Price;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('prices')
+      .insert({
+        reported_by: session.user.id,
+        item_name: newItem,
+        price: Number(newPrice),
+        store: newStore,
+        category: newCategory,
+        reliability_score: 85,
+        notes: newNotes,
+        reported_at: new Date().toISOString(),
+      })
+      .select('*, reporter:users(full_name)')
+      .single();
+    setLoading(false);
 
-    setPrices((prev) => [newPriceItem, ...prev]);
+    if (error) { Alert.alert('שגיאה', 'לא ניתן לדווח על המחיר'); return; }
+    setPrices((prev) => [data as Price, ...prev]);
     setShowCreate(false);
     resetForm();
     Alert.alert('דווח!', 'המחיר דווח בהצלחה');

@@ -56,29 +56,41 @@ export default function RidesScreen() {
     setLoading(false);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!newFrom.trim()) { Alert.alert('שגיאה', 'נא להזין מוצא'); return; }
     if (!newTo.trim()) { Alert.alert('שגיאה', 'נא להזין יעד'); return; }
     if (!newDate.trim()) { Alert.alert('שגיאה', 'נא להזין תאריך'); return; }
     if (!newTime.trim()) { Alert.alert('שגיאה', 'נא להזין שעה'); return; }
 
-    const newRide: Ride = {
-      id: Date.now().toString(),
-      from_location: newFrom,
-      to_location: newTo,
-      date_time: new Date().toISOString(),
-      seats: Number(newSeats) || 4,
-      price: Number(newPrice) || 0,
-      contact_phone: newPhone,
-      notes: newNotes + (isRoundTrip ? ` | חזרה: ${returnTime}` : ''),
-      driver_id: '',
-      created_at: new Date().toISOString(),
-      // Display fields
-      _display_date: newDate,
-      _display_time: newTime,
-    } as any;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) { Alert.alert('שגיאה', 'יש להתחבר קודם'); return; }
 
-    setRides((prev) => [newRide, ...prev]);
+    // Parse DD/MM date + HH:MM time → ISO string
+    const [day, month] = newDate.split('/').map(Number);
+    const [hours, minutes] = newTime.split(':').map(Number);
+    const now = new Date();
+    const dateTime = new Date(now.getFullYear(), (month || 1) - 1, day || 1, hours || 0, minutes || 0);
+    if (dateTime < now) dateTime.setFullYear(now.getFullYear() + 1);
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('rides')
+      .insert({
+        driver_id: session.user.id,
+        from_location: newFrom,
+        to_location: newTo,
+        date_time: dateTime.toISOString(),
+        seats: Number(newSeats) || 4,
+        price: Number(newPrice) || 0,
+        contact_phone: newPhone,
+        notes: newNotes + (isRoundTrip ? ` | חזרה: ${returnTime}` : ''),
+      })
+      .select('*, driver:users(full_name, avatar_url)')
+      .single();
+    setLoading(false);
+
+    if (error) { Alert.alert('שגיאה', 'לא ניתן לפרסם את הטרמפ'); return; }
+    setRides((prev) => [data as Ride, ...prev]);
     setShowCreate(false);
     resetForm();
     Alert.alert('פורסם!', 'הטרמפ פורסם בהצלחה');
