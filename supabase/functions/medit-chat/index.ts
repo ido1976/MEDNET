@@ -526,8 +526,16 @@ serve(async (req) => {
           const sanitizer = ALLOWED_SAVE_FIELDS[field];
 
           if (sanitizer) {
-            const sanitized = sanitizer(value);
+            let sanitized = sanitizer(value);
             if (sanitized !== null) {
+              // children_ages: append to existing array instead of overwriting
+              if (field === 'children_ages') {
+                const { data: cur } = await adminClient
+                  .from('users').select('children_ages').eq('id', user.id).single();
+                const existing: number[] = cur?.children_ages || [];
+                sanitized = [...new Set([...existing, ...(sanitized as number[])])];
+              }
+
               const { error: saveError } = await adminClient
                 .from('users')
                 .update({ [field]: sanitized })

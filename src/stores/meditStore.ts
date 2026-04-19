@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from './authStore';
 import type { MeditMessage, ChatSession } from '../types/database';
 const uuid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -208,6 +209,9 @@ export const useMeditStore = create<MeditState>((set, get) => ({
 
       const updatedMessages = [...get().messages, assistantMessage];
       set({ messages: updatedMessages, loading: false });
+
+      // Refresh profile in case CHATMED saved new fields
+      useAuthStore.getState().fetchProfile();
 
       // Persist full session to AsyncStorage for instant next-load
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
