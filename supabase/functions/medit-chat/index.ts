@@ -133,6 +133,69 @@ function extractTopicTags(question: string, knownTagNames: string[]): string[] {
   );
 }
 
+// Ordered list of profile fields to collect via chat
+const PROFILE_FIELDS_ORDER = [
+  {
+    field: 'marital_status',
+    question: 'מה המצב המשפחתי שלך? (רווק/ה, בזוגיות, נשוי/אה)',
+  },
+  {
+    field: 'has_children',
+    question: 'יש לך ילדים?',
+  },
+  {
+    field: 'children_ages',
+    question: 'כמה שנות גיל יש לילדים? (מופרד בפסיקים, לדוגמה: 3, 7)',
+  },
+  {
+    field: 'bio',
+    question: 'ספר על עצמך במשפט אחד — מה מייחד אותך?',
+  },
+  {
+    field: 'graduation_year',
+    question: 'באיזו שנה אתה מתכנן לסיים את הלימודים?',
+  },
+  {
+    field: 'phone',
+    question: 'מה הטלפון שלך? (לרשות הקהילה)',
+  },
+] as const;
+
+type ProfileField = typeof PROFILE_FIELDS_ORDER[number]['field'];
+
+// Returns ordered list of fields that are null/empty in the profile
+function computeMissingFields(profile: any): { field: ProfileField; question: string }[] {
+  return PROFILE_FIELDS_ORDER.filter(({ field }) => {
+    if (field === 'children_ages') {
+      return profile?.has_children === true &&
+        (!profile?.children_ages || profile.children_ages.length === 0);
+    }
+    const val = profile?.[field];
+    return val === null || val === undefined || val === '' ||
+      (Array.isArray(val) && val.length === 0);
+  });
+}
+
+// Claude tool definition for saving a single profile field
+const PROFILE_COMPLETION_TOOL = {
+  name: 'save_profile_field',
+  description: 'Save a user\'s answer to a profile question. Call this immediately when the user answers a profile question.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      field: {
+        type: 'string',
+        enum: ['marital_status', 'has_children', 'children_ages', 'bio', 'graduation_year', 'phone'],
+        description: 'The profile field to save',
+      },
+      value: {
+        description: 'The value to save. marital_status: "single"|"in_relationship"|"married". has_children: true|false. children_ages: array of integers. graduation_year: integer. bio and phone: string.',
+      },
+    },
+    required: ['field', 'value'],
+  },
+};
+
 serve(async (req) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
