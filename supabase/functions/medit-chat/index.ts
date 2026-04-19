@@ -472,8 +472,9 @@ serve(async (req) => {
       marital_status: (v: any) => ['single', 'in_relationship', 'married'].includes(v) ? v : null,
       has_children: (v: any) => typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : null,
       children_ages: (v: any) => {
-        const arr = Array.isArray(v) ? v : String(v).split(/[\s,]+/);
-        const nums = arr.map(Number).filter((n: number) => !isNaN(n) && n >= 0);
+        if (!v && v !== 0) return null;
+        const arr = Array.isArray(v) ? v : String(v).trim().split(/[\s,]+/).filter(Boolean);
+        const nums = arr.map(Number).filter((n: number) => !isNaN(n) && n >= 0 && n < 100);
         return nums.length > 0 ? nums : null;
       },
       bio: (v: any) => typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null,
