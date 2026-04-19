@@ -95,28 +95,23 @@ export default function ApartmentsScreen() {
     if (!session?.user) { Alert.alert('שגיאה', 'יש להתחבר קודם'); return; }
 
     setLoading(true);
+    const availableFrom = (() => {
+      if (!newAvailableFrom.trim()) return new Date().toISOString().split('T')[0];
+      const [day, month, year] = newAvailableFrom.split('/').map(Number);
+      const d = new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+      return isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    })();
+
     const { data, error } = await supabase
       .from('apartments')
       .insert({
-        created_by: session.user.id,
+        contact_user_id: session.user.id,
         address: newAddress ? `${newAddress}, ${newSettlement}` : newSettlement,
         description: newDesc || newTitle,
         price: Number(newPrice),
         rooms: Number(newRooms),
-        floor: newFloor ? Number(newFloor) : 0,
-        is_furnished: newFurnished,
-        has_balcony: newBalcony,
-        has_parking: newParking,
-        pets_allowed: newPets,
         landlord_rating: 0,
-        available_from: (() => {
-          if (!newAvailableFrom.trim()) return new Date().toISOString();
-          const [day, month, year] = newAvailableFrom.split('/').map(Number);
-          const d = new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
-          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-        })(),
-        contact_phone: newPhone,
-        images: [],
+        available_from: availableFrom,
       })
       .select('*, contact_user:users(full_name, avatar_url)')
       .single();

@@ -82,8 +82,6 @@ export default function RidesScreen() {
         date_time: dateTime.toISOString(),
         seats: Number(newSeats) || 4,
         price: Number(newPrice) || 0,
-        contact_phone: newPhone,
-        notes: newNotes + (isRoundTrip ? ` | חזרה: ${returnTime}` : ''),
       })
       .select('*, driver:users(full_name, avatar_url)')
       .single();

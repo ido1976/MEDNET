@@ -79,10 +79,8 @@ export default function PricesScreen() {
         reported_by: session.user.id,
         item_name: newItem,
         price: Number(newPrice),
-        store: newStore,
         category: newCategory,
         reliability_score: 85,
-        notes: newNotes,
         reported_at: new Date().toISOString(),
       })
       .select('*, reporter:users(full_name)')
