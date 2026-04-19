@@ -191,6 +191,9 @@ export const useMeditStore = create<MeditState>((set, get) => ({
           session_id: sessionId,
           is_new_session: isNewSession,
         },
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {},
       });
 
       if (error) throw error;
