@@ -189,6 +189,7 @@ const PROFILE_COMPLETION_TOOL = {
         description: 'The profile field to save',
       },
       value: {
+        type: 'string',
         description: 'The value to save. marital_status: "single"|"in_relationship"|"married". has_children: true|false. children_ages: array of integers. graduation_year: integer. bio and phone: string.',
       },
     },
