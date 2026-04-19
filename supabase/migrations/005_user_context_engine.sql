@@ -98,10 +98,15 @@ CREATE POLICY "Users can log own searches" ON user_search_history
 CREATE INDEX idx_search_history_user ON user_search_history(user_id, created_at DESC);
 
 -- ============================================
--- 5. Social Graph Enhancement — Friendships
+-- 5. Social Graph Enhancement — Friendships (if exists from earlier migrations)
 -- ============================================
-ALTER TABLE friendships ADD COLUMN IF NOT EXISTS relationship_type TEXT DEFAULT 'friend'
-  CHECK (relationship_type IN ('friend', 'partner', 'family', 'study_buddy'));
+DO $$
+BEGIN
+  ALTER TABLE friendships ADD COLUMN IF NOT EXISTS relationship_type TEXT DEFAULT 'friend'
+    CHECK (relationship_type IN ('friend', 'partner', 'family', 'study_buddy'));
+EXCEPTION WHEN undefined_table THEN
+  NULL;  -- friendships table doesn't exist yet, skip
+END $$;
 
 -- ============================================
 -- 6. User Circles
@@ -255,107 +260,11 @@ CREATE INDEX idx_chat_interactions_user ON chat_interactions(user_id, created_at
 CREATE INDEX idx_chat_interactions_session ON chat_interactions(session_id);
 CREATE INDEX idx_chat_interactions_topics ON chat_interactions USING GIN(topic_tags);
 
--- ============================================
--- 10. Profile Completeness Function
--- ============================================
-CREATE OR REPLACE FUNCTION calculate_profile_completeness(p_user_id UUID)
-RETURNS INTEGER AS $$
-DECLARE
-  score INTEGER := 0;
-  total_fields INTEGER := 10;
-  u RECORD;
-  tag_count INTEGER;
-BEGIN
-  SELECT * INTO u FROM users WHERE id = p_user_id;
-  IF NOT FOUND THEN RETURN 0; END IF;
-
-  -- Check each field (10 points each = 100 total)
-  IF u.full_name IS NOT NULL AND u.full_name != '' THEN score := score + 10; END IF;
-  IF u.avatar_url IS NOT NULL AND u.avatar_url != '' THEN score := score + 10; END IF;
-  IF u.year_of_study IS NOT NULL THEN score := score + 10; END IF;
-  IF u.bio IS NOT NULL AND u.bio != '' THEN score := score + 10; END IF;
-  IF u.settlement IS NOT NULL AND u.settlement != '' THEN score := score + 10; END IF;
-  IF u.academic_track IS NOT NULL AND u.academic_track != '' THEN score := score + 10; END IF;
-  IF u.phone IS NOT NULL AND u.phone != '' THEN score := score + 10; END IF;
-  IF u.origin_city IS NOT NULL AND u.origin_city != '' THEN score := score + 10; END IF;
-  IF array_length(u.interests, 1) > 0 THEN score := score + 10; END IF;
-
-  -- Check tag subscriptions
-  SELECT COUNT(*) INTO tag_count FROM user_tag_subscriptions WHERE user_id = p_user_id;
-  IF tag_count > 0 THEN score := score + 10; END IF;
-
-  RETURN score;
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger to auto-update profile_completeness on user update
-CREATE OR REPLACE FUNCTION update_profile_completeness()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.profile_completeness := calculate_profile_completeness(NEW.id);
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trigger_update_profile_completeness
-  BEFORE UPDATE ON users
-  FOR EACH ROW EXECUTE FUNCTION update_profile_completeness();
+-- NOTE: Functions and triggers (sections 10 & 11) moved to migration 007
+-- to avoid PL/pgSQL parsing issues in Supabase SQL Editor
 
 -- ============================================
--- 11. Auto-generate Circles on Profile Update
--- ============================================
-CREATE OR REPLACE FUNCTION sync_user_circles()
-RETURNS TRIGGER AS $$
-DECLARE
-  circle_id_var UUID;
-BEGIN
-  -- Year group circle
-  IF NEW.year_of_study IS NOT NULL THEN
-    -- Find or create the year group circle
-    SELECT id INTO circle_id_var FROM user_circles
-      WHERE circle_type = 'year_group'
-      AND name = 'שנתון ' || NEW.year_of_study::TEXT
-      AND auto_generated = true;
-
-    IF circle_id_var IS NULL THEN
-      INSERT INTO user_circles (name, circle_type, auto_generated)
-        VALUES ('שנתון ' || NEW.year_of_study::TEXT, 'year_group', true)
-        RETURNING id INTO circle_id_var;
-    END IF;
-
-    INSERT INTO user_circle_members (circle_id, user_id)
-      VALUES (circle_id_var, NEW.id)
-      ON CONFLICT DO NOTHING;
-  END IF;
-
-  -- Settlement circle
-  IF NEW.settlement IS NOT NULL AND NEW.settlement != '' THEN
-    SELECT id INTO circle_id_var FROM user_circles
-      WHERE circle_type = 'settlement'
-      AND name = NEW.settlement
-      AND auto_generated = true;
-
-    IF circle_id_var IS NULL THEN
-      INSERT INTO user_circles (name, circle_type, auto_generated)
-        VALUES (NEW.settlement, 'settlement', true)
-        RETURNING id INTO circle_id_var;
-    END IF;
-
-    INSERT INTO user_circle_members (circle_id, user_id)
-      VALUES (circle_id_var, NEW.id)
-      ON CONFLICT DO NOTHING;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trigger_sync_user_circles
-  AFTER INSERT OR UPDATE OF year_of_study, settlement ON users
-  FOR EACH ROW EXECUTE FUNCTION sync_user_circles();
-
--- ============================================
--- 12. Expand Notifications Type Check
+-- 10. Expand Notifications Type Check
 -- ============================================
 -- Drop the old constraint and create a new one with additional types
 ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;

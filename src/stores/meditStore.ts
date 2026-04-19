@@ -138,6 +138,9 @@ export const useMeditStore = create<MeditState>((set, get) => ({
 
   // Send a message: create session if needed, persist user message, call Edge Function
   sendMessage: async (content: string) => {
+    // Guard: prevent concurrent sends — two rapid taps would create duplicate sessions
+    if (get().loading) return;
+
     const isNewSession = !get().currentSessionId;
 
     const userMessage: MeditMessage = {
@@ -148,8 +151,11 @@ export const useMeditStore = create<MeditState>((set, get) => ({
       session_id: get().currentSessionId || undefined,
     };
 
-    // Optimistic update — show user message immediately
+    // Optimistic update — show user message immediately, block further sends
     set(state => ({ messages: [...state.messages, userMessage], loading: true }));
+
+    // Snapshot history synchronously before any await — prevents stale/duplicate history
+    const historySnapshot = get().messages.map(m => ({ role: m.role, content: m.content }));
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -175,16 +181,13 @@ export const useMeditStore = create<MeditState>((set, get) => ({
           user_id: userId,
           role: 'user',
           content,
-        }).then(() => {}, () => {});
+        }).then(() => {}, (err) => console.warn('Failed to save user message:', err));
       }
 
-      // Build full message history for the API (includes the optimistic user message)
-      const history = get().messages.map(m => ({ role: m.role, content: m.content }));
-
-      // Call Edge Function
+      // Call Edge Function (uses historySnapshot taken synchronously before all awaits)
       const { data, error } = await supabase.functions.invoke('medit-chat', {
         body: {
-          messages: history,
+          messages: historySnapshot,
           session_id: sessionId,
           is_new_session: isNewSession,
         },

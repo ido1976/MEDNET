@@ -129,13 +129,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await AsyncStorage.setItem('mednet_profile', JSON.stringify(updatedUser));
     } catch (e) {}
 
-    // Try to save to DB (will fail silently if tables don't exist)
+    // Save to DB — surface errors so the UI can inform the user
     try {
-      await supabase
+      const { error: dbError } = await supabase
         .from('users')
         .update(updates)
         .eq('id', baseUser.id);
-    } catch (e) {}
+
+      if (dbError) {
+        console.error('Profile DB update failed:', dbError);
+        // Local save already happened — state is updated locally but not in DB
+        // Return the error so the caller can show a warning toast
+        set({ user: updatedUser });
+        return { error: dbError.message };
+      }
+    } catch (e: any) {
+      console.error('Profile update exception:', e);
+      set({ user: updatedUser });
+      return { error: e?.message || 'שגיאה בשמירת הפרופיל' };
+    }
 
     set({ user: updatedUser });
     return { error: null };
@@ -239,8 +251,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) return { error: 'לא מחובר' };
 
     try {
-      // Link both profiles
-      await supabase.from('users').update({ partner_user_id: requesterId }).eq('id', user.id);
+      // Update accepter's own row (User B → partner = A)
+      const { error: ownUpdateError } = await supabase
+        .from('users')
+        .update({ partner_user_id: requesterId })
+        .eq('id', user.id);
+
+      if (ownUpdateError) return { error: ownUpdateError.message };
+
+      // Update requester's row via RPC (service-side function bypasses RLS)
+      // This ensures the link is bidirectional: A.partner=B AND B.partner=A
+      const { error: rpcError } = await supabase.rpc('link_partner', {
+        requester_id: requesterId,
+        accepter_id: user.id,
+      });
+
+      if (rpcError) {
+        // RPC might not exist yet — log but don't fail the whole operation
+        // The requester's row was already set in sendPartnerRequest
+        console.warn('link_partner RPC failed (may not exist yet):', rpcError);
+      }
 
       // Notify the requester
       await supabase.from('notifications').insert({
@@ -253,7 +283,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await get().fetchProfile();
       return { error: null };
     } catch (e: any) {
-      return { error: e.message };
+      return { error: e?.message || 'שגיאה בקבלת הבקשה' };
     }
   },
 }));

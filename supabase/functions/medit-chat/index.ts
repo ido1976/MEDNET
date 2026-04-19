@@ -1,12 +1,18 @@
 // Supabase Edge Function: medit-chat
 // Phase 2A: Personalized context + conversation persistence
+// v2: Security hardening — user-scoped client, atomic rate limit, session ownership check
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const CLAUDE_API_KEY = Deno.env.get('CLAUDE_API_KEY')!;
+const CLAUDE_API_KEY = Deno.env.get('CLAUDE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+
+if (!CLAUDE_API_KEY) {
+  throw new Error('CLAUDE_API_KEY env var is missing — set it in Supabase Dashboard → Edge Functions → Secrets');
+}
 
 const DAILY_LIMIT = 50;
 
@@ -36,7 +42,7 @@ function buildSystemPrompt(
           view: 'צפה ב', create: 'יצר', react: 'הגיב על',
           search: 'חיפש', bookmark: 'שמר', share: 'שיתף',
         };
-        return `${actionMap[a.activity_type] || a.activity_type}${a.target_type} ${timeStr}`;
+        return `${actionMap[a.activity_type] || a.activity_type} ${a.target_type} ${timeStr}`;
       }).join('\n')
     : 'אין פעילות אחרונה';
 
@@ -94,7 +100,9 @@ ${bridgesList}
 // Simple tag extraction: find known tag names that appear in the user's question
 function extractTopicTags(question: string, knownTagNames: string[]): string[] {
   const questionLower = question.toLowerCase();
-  return knownTagNames.filter(tag => questionLower.includes(tag.toLowerCase()));
+  return knownTagNames.filter(tag =>
+    questionLower.includes(tag.toLowerCase()) && tag.length > 2
+  );
 }
 
 serve(async (req) => {
@@ -103,8 +111,16 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // Only accept POST
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
   try {
-    // Auth check
+    // --- 1. Auth check ---
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -113,9 +129,10 @@ serve(async (req) => {
       });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    // Admin client: only for auth.getUser() — service role needed to verify JWT
+    const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
 
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -124,13 +141,49 @@ serve(async (req) => {
       });
     }
 
-    // Rate limit: 50 messages per day
+    // User-scoped client: all user data queries go through this — RLS enforces correctness
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    // --- 2. Validate request body ---
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
+    }
+
+    const { session_id, is_new_session } = body;
+    const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+
+    // Sanitize messages: last 15 only, cap content length, valid roles only
+    const safeMsgs = rawMessages
+      .slice(-15)
+      .map((m: any) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content.slice(0, 2000) : '',
+      }))
+      .filter((m: any) => m.content.length > 0);
+
+    // --- 3. Rate limit: check count (fail closed on error) ---
     const today = new Date().toISOString().split('T')[0];
-    const { count } = await supabase
+    const { count, error: countError } = await adminClient
       .from('medit_usage')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .gte('created_at', `${today}T00:00:00Z`);
+
+    if (countError) {
+      console.error('Rate limit check failed:', countError);
+      return new Response(
+        JSON.stringify({ error: 'שגיאה זמנית, נסה שוב עוד רגע.' }),
+        { status: 503, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+      );
+    }
 
     if ((count || 0) >= DAILY_LIMIT) {
       return new Response(
@@ -139,26 +192,48 @@ serve(async (req) => {
       );
     }
 
-    const { messages, session_id, is_new_session } = await req.json();
+    // Insert usage counter BEFORE Claude call — prevents race condition where
+    // 50 parallel requests all pass the limit check before any insert lands
+    await adminClient.from('medit_usage').insert({
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+    });
 
-    // --- 4 parallel context queries ---
+    // --- 4. Verify session ownership (before any writes) ---
+    if (session_id) {
+      const { data: sessionData, error: sessionError } = await userClient
+        .from('chat_sessions')
+        .select('id')
+        .eq('id', session_id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (sessionError || !sessionData) {
+        return new Response(JSON.stringify({ error: 'Invalid session' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+    }
+
+    // --- 5. Parallel context queries (via userClient — RLS enforced) ---
     const [profileRes, tagsRes, activityRes, pendingRes] = await Promise.all([
-      supabase
+      userClient
         .from('users')
         .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id')
         .eq('id', user.id)
         .single(),
-      supabase
+      userClient
         .from('user_tag_subscriptions')
         .select('tag_id, tag:bridge_tags(name)')
         .eq('user_id', user.id),
-      supabase
+      userClient
         .from('user_activity')
         .select('activity_type, target_type, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(5),
-      supabase
+      userClient
         .from('pending_actions')
         .select('title, due_date')
         .eq('user_id', user.id)
@@ -172,16 +247,15 @@ serve(async (req) => {
       .map((t: any) => t.tag?.name)
       .filter(Boolean) as string[];
 
-    // --- Relevant bridges by subscribed tag IDs (sequential, depends on tagIds) ---
+    // Sequential bridges query (depends on tagIds from above)
     let bridges: any[] = [];
     if (tagIds.length > 0) {
-      const bridgesRes = await supabase
+      const bridgesRes = await userClient
         .from('bridge_tag_assignments')
         .select('bridge:bridges(id, name, description)')
         .in('tag_id', tagIds)
-        .limit(20); // fetch extra for deduplication
+        .limit(20);
 
-      // Deduplicate: same bridge can match multiple subscribed tags
       const seen = new Set<string>();
       bridges = (bridgesRes.data || [])
         .map((b: any) => b.bridge)
@@ -194,7 +268,7 @@ serve(async (req) => {
         .slice(0, 10);
     }
 
-    // --- Build system prompt ---
+    // --- 6. Build system prompt ---
     const systemPrompt = buildSystemPrompt(
       profileRes.data,
       tagNames,
@@ -204,7 +278,7 @@ serve(async (req) => {
       !!is_new_session
     );
 
-    // --- Call Claude API ---
+    // --- 7. Call Claude API ---
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -216,7 +290,7 @@ serve(async (req) => {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
-        messages: (messages as any[]).slice(-15),
+        messages: safeMsgs,
       }),
     });
 
@@ -229,51 +303,50 @@ serve(async (req) => {
     const claudeData = await claudeResponse.json();
     const assistantResponse = claudeData.content?.[0]?.text || 'מצטער, לא הצלחתי לעבד את הבקשה.';
 
-    // --- Persist assistant message + update session ---
+    // --- 8. Persist assistant message + update session ---
     if (session_id) {
       const now = new Date().toISOString();
       const updatePayload: Record<string, any> = { last_message_at: now };
 
-      // Set title from first user message when opening new session
       if (is_new_session) {
-        const firstUserMsg = (messages as any[]).find((m: any) => m.role === 'user');
+        const firstUserMsg = safeMsgs.find((m: any) => m.role === 'user');
         if (firstUserMsg?.content) {
           updatePayload.title = firstUserMsg.content.slice(0, 40);
         }
       }
 
-      await Promise.all([
-        supabase.from('chat_messages').insert({
+      // userClient enforces RLS — only the session owner can write here
+      const [msgResult, sessionResult] = await Promise.all([
+        userClient.from('chat_messages').insert({
           session_id,
           user_id: user.id,
           role: 'assistant',
           content: assistantResponse,
         }),
-        supabase.from('chat_sessions').update(updatePayload).eq('id', session_id),
+        userClient.from('chat_sessions').update(updatePayload).eq('id', session_id),
       ]);
+
+      if (msgResult.error) console.error('Failed to save assistant message:', msgResult.error);
+      if (sessionResult.error) console.error('Failed to update session:', sessionResult.error);
     }
 
-    // --- Log to chat_interactions (fire and forget) ---
-    const lastUserMessage = [...(messages as any[])].reverse().find((m: any) => m.role === 'user');
+    // --- 9. Log to chat_interactions (awaited — analytics, low latency ~5ms) ---
+    const lastUserMessage = [...safeMsgs].reverse().find((m: any) => m.role === 'user');
     if (lastUserMessage?.content) {
-      supabase.from('chat_interactions').insert({
+      const { error: logError } = await userClient.from('chat_interactions').insert({
         user_id: user.id,
         question: lastUserMessage.content,
         topic_tags: extractTopicTags(lastUserMessage.content, tagNames),
         session_id: session_id || null,
-      }).then(() => {}).catch(() => {});
+      });
+      if (logError) console.error('chat_interactions log failed:', logError);
     }
-
-    // --- Increment daily usage counter ---
-    await supabase.from('medit_usage').insert({
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-    });
 
     return new Response(
       JSON.stringify({ response: assistantResponse, session_id: session_id || null }),
       { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
     );
+
   } catch (error) {
     console.error('medit-chat error:', error);
     return new Response(
