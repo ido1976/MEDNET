@@ -1,3 +1,114 @@
+# Onboarding Phase 1 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Expand the existing 6-step onboarding flow to collect all Phase 1 profile fields, subscribe users to real DB tags, and mark onboarding as completed.
+
+**Architecture:** Two files change. `app/index.tsx` gets a stricter routing guard (check `onboarding_completed_at` instead of `full_name`). `app/(auth)/onboarding.tsx` gains a new Location step (settlement, origin_city, academic_track), replaces the static BRIDGE_TAGS chip list with real `bridge_tags` from Supabase, and calls `subscribeToTag` + saves `onboarding_completed_at` on completion.
+
+**Tech Stack:** React Native, Expo Router, Supabase JS client, Zustand (`authStore`).
+
+---
+
+## File Map
+
+| File | Change |
+|------|--------|
+| `app/index.tsx` | Line 16: change routing guard condition |
+| `app/(auth)/onboarding.tsx` | Expand steps, new state, DB fetch, save new fields |
+
+---
+
+### Task 1: Fix routing guard in `app/index.tsx`
+
+**Files:**
+- Modify: `app/index.tsx` line 16
+
+The current guard `!user?.full_name` sends users back to onboarding every time they clear their name. `onboarding_completed_at` is set exactly once and never cleared — it's the correct sentinel.
+
+- [ ] **Step 1: Edit the condition**
+
+In `app/index.tsx`, change line 16 from:
+```tsx
+    } else if (!user?.full_name) {
+```
+to:
+```tsx
+    } else if (!user?.onboarding_completed_at) {
+```
+
+- [ ] **Step 2: Verify the file looks correct**
+
+`app/index.tsx` should now read:
+```tsx
+import { useEffect } from 'react';
+import { useRouter } from 'expo-router';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useAuthStore } from '../src/stores/authStore';
+import { COLORS } from '../src/constants/theme';
+
+export default function Index() {
+  const router = useRouter();
+  const { session, user, loading } = useAuthStore();
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!session) {
+      router.replace('/(auth)/welcome');
+    } else if (!user?.onboarding_completed_at) {
+      router.replace('/(auth)/onboarding');
+    } else {
+      router.replace('/(tabs)/');
+    }
+  }, [loading, session, user]);
+
+  return (
+    <View style={styles.container}>
+      <ActivityIndicator size="large" color={COLORS.primary} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.cream,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/index.tsx
+git commit -m "fix(routing): guard onboarding by onboarding_completed_at instead of full_name"
+```
+
+---
+
+### Task 2: Rewrite `app/(auth)/onboarding.tsx`
+
+**Files:**
+- Modify: `app/(auth)/onboarding.tsx` (full replacement)
+
+Changes:
+1. New state: `settlement`, `academicTrack`, `originCity`, `dbTags`, `selectedTagIds`
+2. `useEffect` to fetch `bridge_tags` from Supabase on mount
+3. TOTAL_STEPS → 7 (adding Location step between Interests and Tags)
+4. Step 4 (NEW): Location — TextInput for settlement, origin_city, academic_track
+5. Step 5 (was 4): Tags — DB chips using `dbTags` / `selectedTagIds`, not static BRIDGE_TAGS
+6. Step 6 (was 5): Avatar — unchanged
+7. Step 7 (was 6): Summary — shows settlement + selected tag names
+8. `handleComplete`: saves all new fields + `onboarding_completed_at`, then calls `subscribeToTag` per selected tag
+
+- [ ] **Step 1: Replace the entire file**
+
+Write the following to `app/(auth)/onboarding.tsx`:
+
+```tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -659,3 +770,88 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+```
+
+- [ ] **Step 2: Verify the import of `BRIDGE_TAGS` is removed from helpers import**
+
+The old line was:
+```tsx
+import { YEAR_LABELS, INTEREST_OPTIONS, BRIDGE_TAGS } from '../../src/lib/helpers';
+```
+The new import is:
+```tsx
+import { YEAR_LABELS, INTEREST_OPTIONS } from '../../src/lib/helpers';
+```
+Confirm this is correct in the file you just wrote.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/(auth)/onboarding.tsx
+git commit -m "feat(onboarding): expand to Phase 1 fields — location step, DB tags, onboarding_completed_at"
+```
+
+---
+
+### Task 3: Manual verification
+
+These steps confirm the feature works end-to-end in the running app.
+
+- [ ] **Step 1: Start the app**
+
+```bash
+npx expo start
+```
+
+Scan the QR code or press `i` for iOS simulator / `a` for Android emulator.
+
+- [ ] **Step 2: Test new user onboarding flow**
+
+Sign up with a new email. Verify:
+1. App routes to onboarding (not home)
+2. Step 1 — Name: entering nothing and pressing "המשך" shows alert
+3. Step 2 — Year: selecting nothing and pressing "המשך" shows alert
+4. Step 3 — Interests: chips toggle correctly; "דלג" skips to step 4
+5. Step 4 — Location: all three TextInputs are RTL; "דלג" works; fields are optional
+6. Step 5 — Tags: chips come from DB (not static list); "דלג" works
+7. Step 6 — Avatar: camera picker opens; "דלג" works
+8. Step 7 — Summary: shows Name, Year, settlement (if entered), interests, selected tag names
+9. "סיום" → loading spinner → navigates to main tabs
+
+- [ ] **Step 3: Verify data in Supabase**
+
+In the Supabase Table Editor, open the `users` table and find the new user row. Confirm:
+- `full_name` is set
+- `year_of_study` is set
+- `settlement`, `origin_city`, `academic_track` contain what was entered (or NULL if skipped)
+- `onboarding_completed_at` is a timestamp (not NULL)
+
+In the `user_tag_subscriptions` table, confirm rows exist for each tag the user selected.
+
+- [ ] **Step 4: Test returning user does NOT re-enter onboarding**
+
+Force-close the app and reopen. Verify the user goes directly to the main tabs (not back to onboarding), because `onboarding_completed_at` is now set.
+
+- [ ] **Step 5: Test existing users (already have full_name, no onboarding_completed_at)**
+
+Sign in with an old test account that has `full_name` set but `onboarding_completed_at = NULL`. Verify:
+- App routes to onboarding (because `onboarding_completed_at` is NULL)
+- Completing onboarding sets the timestamp
+- On next launch, app routes to home
+
+> **Note for existing test users:** If you want to skip re-onboarding an existing account during development, run this SQL in Supabase:
+> ```sql
+> UPDATE users SET onboarding_completed_at = NOW() WHERE email = 'your-test@email.com';
+> ```
+
+---
+
+## Done ✓
+
+After Task 3 passes, the onboarding feature is complete for Phase 1.
+
+**What this delivers:**
+- Users fill in settlement, origin_city, academic_track during onboarding
+- Tag subscriptions are saved to `user_tag_subscriptions` (real DB, used by MEDIT for context)
+- `onboarding_completed_at` is set once and used as the routing guard
+- All fields optional except Name and Year (same as before)

@@ -13,7 +13,7 @@ export default function Index() {
 
     if (!session) {
       router.replace('/(auth)/welcome');
-    } else if (!user?.full_name) {
+    } else if (!user?.onboarding_completed_at) {
       router.replace('/(auth)/onboarding');
     } else {
       router.replace('/(tabs)/');
