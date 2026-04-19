@@ -60,11 +60,21 @@ export default function ProfileScreen() {
   );
   const [languages, setLanguages] = useState<string[]>(user?.languages || ['עברית']);
   const [hasChildren, setHasChildren] = useState<boolean>(user?.has_children || false);
-  const [childrenAges, setChildrenAges] = useState<string>(
-    user?.children_ages?.join(', ') || ''
-  );
 
-  // Children from user_children table (via authStore for live updates)
+  type EditingChild = { id?: string; name: string; gender: 'male' | 'female' | null; age: string };
+  const [editingChildren, setEditingChildren] = useState<EditingChild[]>([]);
+
+  // Init editingChildren when entering edit mode
+  useEffect(() => {
+    if (editing) {
+      setEditingChildren(children.map(c => ({
+        id: c.id,
+        name: c.name || '',
+        gender: c.gender,
+        age: String(c.age),
+      })));
+    }
+  }, [editing]);
 
   // Couple sync
   const [partnerSearch, setPartnerSearch] = useState('');
@@ -222,20 +232,12 @@ export default function ProfileScreen() {
       setGraduationYear(user.graduation_year?.toString() || '');
       setLanguages(user.languages || ['עברית']);
       setHasChildren(user.has_children || false);
-      setChildrenAges(user.children_ages?.join(', ') || '');
     }
   }, [user?.full_name, user?.year_of_study, user?.interests?.length, (user as any)?.user_type,
       user?.bio, user?.settlement, user?.graduation_year, user?.languages?.length,
-      user?.has_children, user?.children_ages?.length]);
+      user?.has_children]);
 
   const handleSave = async () => {
-    const parsedChildrenAges = hasChildren && childrenAges.trim()
-      ? childrenAges
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => !isNaN(n))
-      : [];
-
     const { error } = await updateProfile({
       full_name: fullName,
       year_of_study: yearOfStudy,
@@ -250,13 +252,40 @@ export default function ProfileScreen() {
       graduation_year: graduationYear ? parseInt(graduationYear, 10) : null,
       languages,
       has_children: hasChildren,
-      children_ages: parsedChildrenAges,
     } as any);
     if (error) {
       Alert.alert('שגיאה', error);
-    } else {
-      setEditing(false);
+      return;
     }
+
+    // Sync children: delete removed, update existing, insert new
+    if (user?.id) {
+      const originalIds = new Set(children.map(c => c.id));
+      const keptIds = new Set(editingChildren.filter(c => c.id).map(c => c.id!));
+      const toDelete = [...originalIds].filter(id => !keptIds.has(id));
+      if (toDelete.length > 0) {
+        await supabase.from('user_children').delete().in('id', toDelete).eq('user_id', user.id);
+      }
+      for (const child of editingChildren) {
+        const age = parseInt(child.age, 10);
+        if (isNaN(age) || age < 0 || age >= 100) continue;
+        if (child.id) {
+          await supabase.from('user_children')
+            .update({ name: child.name.trim() || null, gender: child.gender, age })
+            .eq('id', child.id).eq('user_id', user.id);
+        } else {
+          await supabase.from('user_children').insert({
+            user_id: user.id,
+            name: child.name.trim() || null,
+            gender: child.gender,
+            age,
+          });
+        }
+      }
+      await fetchChildren(user.id);
+    }
+
+    setEditing(false);
   };
 
   const pickAvatar = async () => {
@@ -574,26 +603,83 @@ export default function ProfileScreen() {
           <View style={styles.field}>
             <Text style={styles.fieldLabel}>ילדים</Text>
             {editing ? (
-              <View style={styles.yearRow}>
-                <TouchableOpacity
-                  style={[styles.yearChip, hasChildren && styles.yearChipActive]}
-                  onPress={() => setHasChildren(true)}
-                >
-                  <Text style={[styles.yearChipText, hasChildren && styles.yearChipTextActive]}>יש ילדים</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.yearChip, !hasChildren && styles.yearChipActive]}
-                  onPress={() => setHasChildren(false)}
-                >
-                  <Text style={[styles.yearChipText, !hasChildren && styles.yearChipTextActive]}>אין ילדים</Text>
-                </TouchableOpacity>
-              </View>
+              <>
+                <View style={styles.yearRow}>
+                  <TouchableOpacity
+                    style={[styles.yearChip, hasChildren && styles.yearChipActive]}
+                    onPress={() => setHasChildren(true)}
+                  >
+                    <Text style={[styles.yearChipText, hasChildren && styles.yearChipTextActive]}>יש ילדים</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.yearChip, !hasChildren && styles.yearChipActive]}
+                    onPress={() => setHasChildren(false)}
+                  >
+                    <Text style={[styles.yearChipText, !hasChildren && styles.yearChipTextActive]}>אין ילדים</Text>
+                  </TouchableOpacity>
+                </View>
+                {hasChildren && (
+                  <View style={{ marginTop: SPACING.sm }}>
+                    {editingChildren.map((child, index) => (
+                      <View key={child.id || `new-${index}`} style={styles.childEditRow}>
+                        <TouchableOpacity
+                          style={styles.childDeleteBtn}
+                          onPress={() => setEditingChildren(prev => prev.filter((_, i) => i !== index))}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={COLORS.red} />
+                        </TouchableOpacity>
+                        <View style={{ flex: 1 }}>
+                          <View style={styles.childEditFields}>
+                            <TextInput
+                              style={[styles.fieldInput, { flex: 1 }]}
+                              value={child.name}
+                              onChangeText={text => setEditingChildren(prev => prev.map((c, i) => i === index ? { ...c, name: text } : c))}
+                              placeholder="שם (אופציונלי)"
+                              placeholderTextColor={COLORS.grayLight}
+                              textAlign="right"
+                            />
+                            <TextInput
+                              style={[styles.fieldInput, { width: 55 }]}
+                              value={child.age}
+                              onChangeText={text => setEditingChildren(prev => prev.map((c, i) => i === index ? { ...c, age: text } : c))}
+                              keyboardType="numeric"
+                              placeholder="גיל"
+                              placeholderTextColor={COLORS.grayLight}
+                              textAlign="right"
+                            />
+                          </View>
+                          <View style={[styles.yearRow, { marginTop: 4 }]}>
+                            {([['male', 'בן'], ['female', 'בת']] as const).map(([val, label]) => (
+                              <TouchableOpacity
+                                key={val}
+                                style={[styles.yearChip, child.gender === val && styles.yearChipActive]}
+                                onPress={() => setEditingChildren(prev => prev.map((c, i) => i === index ? { ...c, gender: val } : c))}
+                              >
+                                <Text style={[styles.yearChipText, child.gender === val && styles.yearChipTextActive]}>
+                                  {label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.addChildBtn}
+                      onPress={() => setEditingChildren(prev => [...prev, { name: '', gender: null, age: '' }])}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
+                      <Text style={{ color: COLORS.primary, fontSize: 14, marginRight: 4 }}>הוסף ילד/ה</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
             ) : (
               <Text style={styles.fieldValue}>{user?.has_children ? 'יש ילדים' : 'אין ילדים'}</Text>
             )}
           </View>
 
-          {user?.has_children && (
+          {!editing && user?.has_children && (
             <>
               <View style={styles.divider} />
               <View style={styles.field}>
@@ -1172,6 +1258,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.red,
+  },
+  childEditRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.grayLight,
+  },
+  childEditFields: {
+    flexDirection: 'row-reverse',
+    gap: SPACING.sm,
+    alignItems: 'center',
+  },
+  childDeleteBtn: {
+    paddingTop: 6,
+  },
+  addChildBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    gap: 4,
   },
   progressBarBg: {
     width: '100%',
