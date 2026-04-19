@@ -242,7 +242,6 @@ serve(async (req) => {
   try {
     // --- 1. Auth check ---
     const authHeader = req.headers.get('Authorization');
-    console.log('[medit-chat] request received | authHeader present:', !!authHeader, '| prefix:', authHeader?.slice(0, 30) || 'NONE');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -253,9 +252,7 @@ serve(async (req) => {
     // Admin client: only for auth.getUser() — service role needed to verify JWT
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const token = authHeader.replace('Bearer ', '');
-    console.log('[auth] header present:', !!authHeader, '| token prefix:', token.slice(0, 20));
     const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
-    console.log('[auth] getUser result — user:', user?.id || 'null', '| error:', authError?.message || 'none');
 
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -444,8 +441,6 @@ serve(async (req) => {
     );
 
     // --- 7. Call Claude API (with tool_use support) ---
-    console.log('[medit-chat] missingFields count:', missingFields.length, 'isNewSession:', !!is_new_session);
-
     const callClaude = async (messages: any[]): Promise<any> => {
       const requestBody = {
         model: 'claude-sonnet-4-6',
@@ -454,7 +449,6 @@ serve(async (req) => {
         tools: missingFields.length > 0 ? [PROFILE_COMPLETION_TOOL] : undefined,
         messages,
       };
-      console.log('[medit-chat] calling Claude, messages count:', messages.length, 'tools:', requestBody.tools ? 'yes' : 'no');
 
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
