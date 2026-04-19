@@ -242,6 +242,7 @@ serve(async (req) => {
   try {
     // --- 1. Auth check ---
     const authHeader = req.headers.get('Authorization');
+    console.log('[medit-chat] request received | authHeader present:', !!authHeader, '| prefix:', authHeader?.slice(0, 30) || 'NONE');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
