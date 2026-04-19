@@ -505,54 +505,58 @@ serve(async (req) => {
     let claudeData = await callClaude(conversationMessages);
     let assistantResponse = '';
 
-    // Handle tool_use round-trip (Claude may call save_profile_field)
+    // Handle tool_use round-trip — process ALL tool_use blocks in each response
     let toolCallCount = 0;
     while (claudeData.stop_reason === 'tool_use') {
       if (++toolCallCount > 10) {
         console.error('Tool call limit exceeded — breaking loop');
         break;
       }
-      const toolUseBlock = claudeData.content.find((b: any) => b.type === 'tool_use');
-      if (!toolUseBlock) break;
 
-      let toolResult = 'saved';
+      const toolUseBlocks = claudeData.content.filter((b: any) => b.type === 'tool_use');
+      if (toolUseBlocks.length === 0) break;
 
-      if (toolUseBlock.name === 'save_profile_field') {
-        const { field, value } = toolUseBlock.input || {};
-        const sanitizer = ALLOWED_SAVE_FIELDS[field];
+      // Process every tool_use block in this response and collect results
+      const toolResults: any[] = [];
+      for (const toolUseBlock of toolUseBlocks) {
+        let toolResult = 'saved';
 
-        if (sanitizer) {
-          const sanitized = sanitizer(value);
-          if (sanitized !== null) {
-            const { error: saveError } = await adminClient
-              .from('users')
-              .update({ [field]: sanitized })
-              .eq('id', user.id);
+        if (toolUseBlock.name === 'save_profile_field') {
+          const { field, value } = toolUseBlock.input || {};
+          const sanitizer = ALLOWED_SAVE_FIELDS[field];
 
-            if (saveError) {
-              console.error(`Failed to save profile field ${field}:`, saveError);
-              toolResult = 'error saving field';
+          if (sanitizer) {
+            const sanitized = sanitizer(value);
+            if (sanitized !== null) {
+              const { error: saveError } = await adminClient
+                .from('users')
+                .update({ [field]: sanitized })
+                .eq('id', user.id);
+
+              if (saveError) {
+                console.error(`Failed to save profile field ${field}:`, saveError);
+                toolResult = 'error saving field';
+              }
+            } else {
+              toolResult = 'invalid value — skipped';
             }
           } else {
-            toolResult = 'invalid value — skipped';
+            toolResult = 'unknown field — skipped';
           }
-        } else {
-          toolResult = 'unknown field — skipped';
         }
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUseBlock.id,
+          content: toolResult,
+        });
       }
 
-      // Send tool_result back to Claude and get next response
+      // Send all tool_results back to Claude in a single user message
       conversationMessages = [
         ...conversationMessages,
         { role: 'assistant', content: claudeData.content },
-        {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: toolUseBlock.id,
-            content: toolResult,
-          }],
-        },
+        { role: 'user', content: toolResults },
       ];
 
       claudeData = await callClaude(conversationMessages);
