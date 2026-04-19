@@ -471,8 +471,21 @@ serve(async (req) => {
 
     // Allowed fields whitelist with sanitizers — prevents arbitrary column writes
     const ALLOWED_SAVE_FIELDS: Record<string, (v: any) => any> = {
-      marital_status: (v: any) => ['single', 'in_relationship', 'married'].includes(v) ? v : null,
-      has_children: (v: any) => typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : null,
+      marital_status: (v: any) => {
+        const map: Record<string, string> = {
+          single: 'single', רווק: 'single', רווקה: 'single',
+          in_relationship: 'in_relationship', בזוגיות: 'in_relationship',
+          married: 'married', נשוי: 'married', נשואה: 'married',
+        };
+        return map[String(v || '').trim()] ?? null;
+      },
+      has_children: (v: any) => {
+        if (typeof v === 'boolean') return v;
+        const s = String(v).trim().toLowerCase();
+        if (['true', 'yes', 'כן', '1'].includes(s)) return true;
+        if (['false', 'no', 'לא', '0'].includes(s)) return false;
+        return null;
+      },
       children_ages: (v: any) => {
         if (!v && v !== 0) return null;
         const arr = Array.isArray(v) ? v : String(v).trim().split(/[\s,]+/).filter(Boolean);
