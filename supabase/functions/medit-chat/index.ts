@@ -34,7 +34,8 @@ function buildSystemPrompt(
     circles: string[];
     recentChatTopics: string[];
     partnerName: string | null;
-  }
+  },
+  missingFields: { field: string; question: string }[]
 ): string {
   const firstName = profile?.full_name?.split(' ')[0] || 'חבר/ה';
 
@@ -89,6 +90,33 @@ function buildSystemPrompt(
     ? '\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי ואמור לו דבר אחד חשוב שממתין לו (pending action בעדיפות ראשונה, אחרת גשר חדש רלוונטי). אם אין כלום — שאל מה הוא צריך היום.'
     : '';
 
+  // Profile completion section
+  let profileCompletionSection = '';
+  if (missingFields.length > 0) {
+    const questionsList = missingFields.map(f => `- ${f.question}`).join('\n');
+    if (isNewSession) {
+      profileCompletionSection = `
+
+=== השלמת פרופיל (שיחה ראשונה) ===
+שאל את המשתמש על השדות הבאים אחד-אחד, לפי הסדר:
+${questionsList}
+
+כללים:
+1. שאל שאלה אחת בכל הודעה — אחרי ברכת הפתיחה, שאל את השאלה הראשונה
+2. כשמקבל תשובה — קרא ל-save_profile_field ועבור לשאלה הבאה
+3. אם המשתמש אומר "דלג" / "לא רוצה" / "אחר כך" / "פחות חשוב" — עבור לשאלה הבאה בלי לשמור
+4. אחרי כל השאלות — המשך כרגיל לשיחה חופשית
+5. שמור על טון חם ואישי — לא כמו טופס`;
+    } else {
+      profileCompletionSection = `
+
+=== שדות פרופיל חסרים ===
+אם ההקשר מתאים — שאל באופן טבעי על אחד מהשדות הבאים (בחר את המתאים ביותר):
+${questionsList}
+אל תכריח — שאל רק אם זה מרגיש טבעי בהמשך השיחה.`;
+    }
+  }
+
   return `אתה CHATMED — הצ'אט החכם של MEDNET, הרשת החברתית לסטודנטים לרפואה בצפת.
 אתה החבר הקרוב של ${firstName}. אתה מכיר אותו לעומק ומלווה אותו.
 
@@ -122,7 +150,7 @@ ${recentTopicsList}
 4. ענה רק על מידע שקיים ב-MEDNET — אל תמציא
 5. שמור על טון חם, ישיר, כמו חבר קרוב — לא פורמלי
 6. דבר עברית בלבד
-7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים${newSessionInstruction}`;
+7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים${newSessionInstruction}${profileCompletionSection}`;
 }
 
 // Simple tag extraction: find known tag names that appear in the user's question
@@ -312,7 +340,7 @@ serve(async (req) => {
     const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes, recentChatsRes] = await Promise.all([
       userClient
         .from('users')
-        .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id, bio, interests')
+        .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id, bio, interests, graduation_year, phone, children_ages')
         .eq('id', user.id)
         .single(),
       userClient
@@ -399,6 +427,8 @@ serve(async (req) => {
       partnerName,
     };
 
+    const missingFields = computeMissingFields(profileRes.data);
+
     const systemPrompt = buildSystemPrompt(
       profileRes.data,
       tagNames,
@@ -406,7 +436,8 @@ serve(async (req) => {
       pendingRes.data || [],
       bridges,
       !!is_new_session,
-      extras
+      extras,
+      missingFields
     );
 
     // --- 7. Call Claude API ---
