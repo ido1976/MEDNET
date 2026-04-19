@@ -229,10 +229,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) return { error: 'לא מחובר' };
 
     try {
-      // Update own profile with partner ID (pending)
-      await supabase.from('users').update({ partner_user_id: partnerUserId }).eq('id', user.id);
-
-      // Create a notification for the partner
+      // Only send a notification — partner_user_id is set only upon acceptance
       await supabase.from('notifications').insert({
         user_id: partnerUserId,
         type: 'partner_request',
