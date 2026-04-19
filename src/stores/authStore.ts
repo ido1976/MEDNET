@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import type { User, BridgeTag, UserTagSubscription } from '../types/database';
+import type { User, BridgeTag, UserTagSubscription, UserChild } from '../types/database';
 
 interface AuthState {
   user: User | null;
@@ -9,6 +9,7 @@ interface AuthState {
   loading: boolean;
   onboardingStep: number;
   subscribedTags: BridgeTag[];
+  children: UserChild[];
   setUser: (user: User | null) => void;
   setSession: (session: any) => void;
   setLoading: (loading: boolean) => void;
@@ -17,6 +18,7 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   fetchProfile: () => Promise<void>;
+  fetchChildren: (userId: string) => Promise<void>;
   updateProfile: (updates: Partial<User>) => Promise<{ error: string | null }>;
   initialize: () => Promise<void>;
   // Tag subscriptions
@@ -34,6 +36,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: true,
   onboardingStep: 0,
   subscribedTags: [],
+  children: [],
 
   setUser: (user) => set({ user }),
   setSession: (session) => set({ session }),
@@ -73,6 +76,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, session: null });
   },
 
+  fetchChildren: async (userId: string) => {
+    try {
+      const { data } = await supabase
+        .from('user_children')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      set({ children: (data || []) as UserChild[] });
+    } catch (e) {}
+  },
+
   fetchProfile: async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return;
@@ -86,6 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .single();
       if (data) {
         set({ user: data as User });
+        get().fetchChildren(session.user.id);
         return;
       }
     } catch (e) {}

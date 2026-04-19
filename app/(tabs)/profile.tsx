@@ -34,6 +34,7 @@ export default function ProfileScreen() {
     user, updateProfile, signOut,
     subscribedTags, subscribeToTag, unsubscribeFromTag,
     sendPartnerRequest, acceptPartnerRequest,
+    children, fetchChildren,
   } = useAuthStore();
   const { allTags, fetchAllTags, createTag } = useBridgeStore();
   const [editing, setEditing] = useState(false);
@@ -63,8 +64,7 @@ export default function ProfileScreen() {
     user?.children_ages?.join(', ') || ''
   );
 
-  // Children from user_children table
-  const [children, setChildren] = useState<UserChild[]>([]);
+  // Children from user_children table (via authStore for live updates)
 
   // Couple sync
   const [partnerSearch, setPartnerSearch] = useState('');
@@ -91,15 +91,6 @@ export default function ProfileScreen() {
     }
     fetchAllTags();
   }, [user?.id]);
-
-  const fetchChildren = async (userId: string) => {
-    const { data } = await supabase
-      .from('user_children')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-    if (data) setChildren(data as UserChild[]);
-  };
 
   const fetchPartnerData = async (userId: string) => {
     if (user?.partner_user_id) {

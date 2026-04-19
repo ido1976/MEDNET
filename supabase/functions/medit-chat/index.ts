@@ -34,6 +34,7 @@ function buildSystemPrompt(
     circles: string[];
     recentChatTopics: string[];
     partnerName: string | null;
+    children: { id: string; name: string | null; gender: string | null; age: number }[];
   },
   missingFields: { field: string; question: string }[]
 ): string {
@@ -86,6 +87,14 @@ function buildSystemPrompt(
     ? extras.recentChatTopics.map((q: string) => `- ${q}`).join('\n')
     : 'אין שיחות קודמות';
 
+  const childrenList = extras.children.length > 0
+    ? extras.children.map((c) => {
+        const genderLabel = c.gender === 'female' ? 'בת' : c.gender === 'male' ? 'בן' : 'ילד';
+        const namePart = c.name ? ` | שם: ${c.name}` : '';
+        return `- ID: ${c.id} | ${genderLabel} | גיל ${c.age}${namePart}`;
+      }).join('\n')
+    : null;
+
   const newSessionInstruction = isNewSession
     ? '\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי ואמור לו דבר אחד חשוב שממתין לו (pending action בעדיפות ראשונה, אחרת גשר חדש רלוונטי). אם אין כלום — שאל מה הוא צריך היום.'
     : '';
@@ -123,7 +132,7 @@ ${questionsList}
 === זהות המשתמש ===
 שם: ${profile?.full_name || '—'} | שנה: ${profile?.year_of_study || '—'} | מסלול: ${profile?.academic_track || '—'}
 ישוב: ${profile?.settlement || '—'} | עיר מוצא: ${profile?.origin_city || '—'}
-מצב משפחתי: ${profile?.marital_status || '—'} | ילדים: ${profile?.has_children ? 'כן' : 'לא'}${partnerLine}${bioLine}${interestsLine}${circlesLine}
+מצב משפחתי: ${profile?.marital_status || '—'} | ילדים: ${profile?.has_children ? `כן (${extras.children.length})` : 'לא'}${partnerLine}${bioLine}${interestsLine}${circlesLine}
 
 === תחומי עניין (תיוגים שעוקב אחריהם) ===
 ${tagsList}
@@ -142,7 +151,7 @@ ${searchList}
 
 === נושאים שנשאלו לאחרונה בצ'אט ===
 ${recentTopicsList}
-
+${childrenList ? `\n=== ילדים קיימים (השתמש ב-ID לעדכון) ===\n${childrenList}` : ''}
 === כללי התנהגות ===
 1. פנה תמיד בשמו הפרטי
 2. בפתיחת שיחה חדשה — ציין מיד דבר אחד חשוב שממתין לו
@@ -152,7 +161,8 @@ ${recentTopicsList}
 6. דבר עברית בלבד
 7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים
 8. אם המשתמש מבקש לעדכן פרט בפרופיל (כגון מצב משפחתי, ביוגרפיה, טלפון וכד') — קרא ל-save_profile_field מיד
-9. לשמירת פרטי ילד — קרא ל-save_child פעם אחת לכל ילד בנפרד (שם אם ידוע, מגדר, גיל). אסור לשמור כמה ילדים בקריאה אחת${newSessionInstruction}${profileCompletionSection}`;
+9. לשמירת ילד חדש — קרא ל-save_child פעם אחת לכל ילד בנפרד (שם אם ידוע, מגדר, גיל). אסור לשמור כמה ילדים בקריאה אחת
+10. לתיקון פרטי ילד קיים (גיל, שם, מגדר) — קרא ל-update_child עם ה-ID מרשימת "ילדים קיימים". לא save_child${newSessionInstruction}${profileCompletionSection}`;
 }
 
 // Simple tag extraction: find known tag names that appear in the user's question
@@ -197,6 +207,22 @@ function computeMissingFields(profile: any): { field: ProfileField; question: st
       (Array.isArray(val) && val.length === 0);
   });
 }
+
+// Claude tool for updating an existing child's details
+const UPDATE_CHILD_TOOL = {
+  name: 'update_child',
+  description: 'Update details of an existing child. Use the child_id from the system prompt children list.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      child_id: { type: 'string', description: 'The UUID of the child from ילדים קיימים list' },
+      name: { type: 'string', description: 'New name (optional)' },
+      gender: { type: 'string', enum: ['male', 'female'], description: 'New gender (optional)' },
+      age: { type: 'number', description: 'New age (optional)' },
+    },
+    required: ['child_id'],
+  },
+};
 
 // Claude tool for saving a single child's details
 const SAVE_CHILD_TOOL = {
@@ -346,7 +372,7 @@ serve(async (req) => {
     }
 
     // --- 5. Parallel context queries (via userClient — RLS enforced) ---
-    const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes, recentChatsRes] = await Promise.all([
+    const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes, recentChatsRes, childrenRes] = await Promise.all([
       userClient
         .from('users')
         .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id, bio, interests, graduation_year, phone, children_ages')
@@ -385,6 +411,11 @@ serve(async (req) => {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(5),
+      userClient
+        .from('user_children')
+        .select('id, name, gender, age')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true }),
     ]);
 
     // Resolve partner first name (only if linked)
@@ -434,6 +465,7 @@ serve(async (req) => {
         .map((c: any) => c.question?.slice(0, 80))
         .filter(Boolean) as string[],
       partnerName,
+      children: (childrenRes.data || []) as { id: string; name: string | null; gender: string | null; age: number }[],
     };
 
     const missingFields = computeMissingFields(profileRes.data);
@@ -455,7 +487,7 @@ serve(async (req) => {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
-        tools: [PROFILE_COMPLETION_TOOL, SAVE_CHILD_TOOL],
+        tools: [PROFILE_COMPLETION_TOOL, SAVE_CHILD_TOOL, UPDATE_CHILD_TOOL],
         messages,
       };
 
@@ -529,7 +561,34 @@ serve(async (req) => {
       for (const toolUseBlock of toolUseBlocks) {
         let toolResult = 'saved';
 
-        if (toolUseBlock.name === 'save_child') {
+        if (toolUseBlock.name === 'update_child') {
+          const { child_id, name, gender, age } = toolUseBlock.input || {};
+          if (!child_id) {
+            toolResult = 'missing child_id';
+          } else {
+            const updates: Record<string, any> = {};
+            if (typeof name === 'string' && name.trim()) updates.name = name.trim();
+            if (gender === 'male' || gender === 'female') updates.gender = gender;
+            if (typeof age === 'number' && age >= 0 && age < 100) updates.age = age;
+            else if (age !== undefined) {
+              const parsed = parseInt(String(age), 10);
+              if (!isNaN(parsed) && parsed >= 0 && parsed < 100) updates.age = parsed;
+            }
+            if (Object.keys(updates).length === 0) {
+              toolResult = 'no valid fields to update';
+            } else {
+              const { error: updErr } = await adminClient
+                .from('user_children')
+                .update(updates)
+                .eq('id', child_id)
+                .eq('user_id', user.id);
+              if (updErr) {
+                console.error('Failed to update child:', updErr);
+                toolResult = 'error updating child';
+              }
+            }
+          }
+        } else if (toolUseBlock.name === 'save_child') {
           const { name, gender, age } = toolUseBlock.input || {};
           const validAge = typeof age === 'number' ? age : parseInt(String(age), 10);
           if (!isNaN(validAge) && validAge >= 0 && validAge < 100) {
