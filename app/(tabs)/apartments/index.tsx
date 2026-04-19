@@ -109,7 +109,12 @@ export default function ApartmentsScreen() {
         has_parking: newParking,
         pets_allowed: newPets,
         landlord_rating: 0,
-        available_from: newAvailableFrom || new Date().toISOString(),
+        available_from: (() => {
+          if (!newAvailableFrom.trim()) return new Date().toISOString();
+          const [day, month, year] = newAvailableFrom.split('/').map(Number);
+          const d = new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1);
+          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        })(),
         contact_phone: newPhone,
         images: [],
       })

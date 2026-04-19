@@ -1,7 +1,9 @@
 import { format, formatDistanceToNow, isToday, isTomorrow, isYesterday } from 'date-fns';
 
 export function formatDate(dateString: string): string {
+  if (!dateString) return '—';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString;
   if (isToday(date)) return 'היום';
   if (isYesterday(date)) return 'אתמול';
   if (isTomorrow(date)) return 'מחר';
