@@ -471,7 +471,11 @@ serve(async (req) => {
     const ALLOWED_SAVE_FIELDS: Record<string, (v: any) => any> = {
       marital_status: (v: any) => ['single', 'in_relationship', 'married'].includes(v) ? v : null,
       has_children: (v: any) => typeof v === 'boolean' ? v : v === 'true' ? true : v === 'false' ? false : null,
-      children_ages: (v: any) => Array.isArray(v) ? v.map(Number).filter((n: number) => !isNaN(n)) : null,
+      children_ages: (v: any) => {
+        const arr = Array.isArray(v) ? v : String(v).split(/[\s,]+/);
+        const nums = arr.map(Number).filter((n: number) => !isNaN(n) && n >= 0);
+        return nums.length > 0 ? nums : null;
+      },
       bio: (v: any) => typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null,
       graduation_year: (v: any) => {
         const n = parseInt(v, 10);
@@ -485,7 +489,12 @@ serve(async (req) => {
     let assistantResponse = '';
 
     // Handle tool_use round-trip (Claude may call save_profile_field)
+    let toolCallCount = 0;
     while (claudeData.stop_reason === 'tool_use') {
+      if (++toolCallCount > 10) {
+        console.error('Tool call limit exceeded — breaking loop');
+        break;
+      }
       const toolUseBlock = claudeData.content.find((b: any) => b.type === 'tool_use');
       if (!toolUseBlock) break;
 
