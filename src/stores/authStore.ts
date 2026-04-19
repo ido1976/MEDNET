@@ -149,7 +149,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return { error: e?.message || 'שגיאה בשמירת הפרופיל' };
     }
 
-    set({ user: updatedUser });
+    await get().fetchProfile();
     return { error: null };
   },
 

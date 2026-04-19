@@ -76,7 +76,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS trigger_sync_user_circles ON users;
 CREATE TRIGGER trigger_sync_user_circles
