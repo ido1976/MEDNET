@@ -21,14 +21,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Build rich Hebrew system prompt from Phase 1 context data
+// Build rich Hebrew system prompt from Phase 2 context data
 function buildSystemPrompt(
   profile: any,
   tagNames: string[],
   activity: any[],
   pendingActions: any[],
   bridges: any[],
-  isNewSession: boolean
+  isNewSession: boolean,
+  extras: {
+    searchHistory: any[];
+    circles: string[];
+    recentChatTopics: string[];
+    partnerName: string | null;
+  }
 ): string {
   const firstName = profile?.full_name?.split(' ')[0] || 'חבר/ה';
 
@@ -60,8 +66,24 @@ function buildSystemPrompt(
     : 'אין גשרים רלוונטיים';
 
   const partnerLine = profile?.partner_user_id
-    ? '\nבן/בת זוג: מחובר/ת ל-MEDNET'
+    ? `\nבן/בת זוג: ${extras.partnerName || 'מחובר/ת ל-MEDNET'}`
     : '';
+
+  const bioLine = profile?.bio ? `\nביוגרפיה: ${profile.bio}` : '';
+  const interestsLine = profile?.interests?.length
+    ? `\nתחומי לימוד: ${profile.interests.join(', ')}`
+    : '';
+  const circlesLine = extras.circles.length > 0
+    ? `\nחוגים: ${extras.circles.join(', ')}`
+    : '';
+
+  const searchList = extras.searchHistory.length > 0
+    ? extras.searchHistory.map((s: any) => `- "${s.query}" (${s.context || 'כללי'})`).join('\n')
+    : 'אין חיפושים אחרונים';
+
+  const recentTopicsList = extras.recentChatTopics.length > 0
+    ? extras.recentChatTopics.map((q: string) => `- ${q}`).join('\n')
+    : 'אין שיחות קודמות';
 
   const newSessionInstruction = isNewSession
     ? '\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי ואמור לו דבר אחד חשוב שממתין לו (pending action בעדיפות ראשונה, אחרת גשר חדש רלוונטי). אם אין כלום — שאל מה הוא צריך היום.'
@@ -73,7 +95,7 @@ function buildSystemPrompt(
 === זהות המשתמש ===
 שם: ${profile?.full_name || '—'} | שנה: ${profile?.year_of_study || '—'} | מסלול: ${profile?.academic_track || '—'}
 ישוב: ${profile?.settlement || '—'} | עיר מוצא: ${profile?.origin_city || '—'}
-מצב משפחתי: ${profile?.marital_status || '—'} | ילדים: ${profile?.has_children ? 'כן' : 'לא'}${partnerLine}
+מצב משפחתי: ${profile?.marital_status || '—'} | ילדים: ${profile?.has_children ? 'כן' : 'לא'}${partnerLine}${bioLine}${interestsLine}${circlesLine}
 
 === תחומי עניין (תיוגים שעוקב אחריהם) ===
 ${tagsList}
@@ -86,6 +108,12 @@ ${pendingList}
 
 === גשרים רלוונטיים שעודכנו לאחרונה ===
 ${bridgesList}
+
+=== חיפושים אחרונים ===
+${searchList}
+
+=== נושאים שנשאלו לאחרונה בצ'אט ===
+${recentTopicsList}
 
 === כללי התנהגות ===
 1. פנה תמיד בשמו הפרטי
@@ -217,10 +245,10 @@ serve(async (req) => {
     }
 
     // --- 5. Parallel context queries (via userClient — RLS enforced) ---
-    const [profileRes, tagsRes, activityRes, pendingRes] = await Promise.all([
+    const [profileRes, tagsRes, activityRes, pendingRes, searchRes, circlesRes] = await Promise.all([
       userClient
         .from('users')
-        .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id')
+        .select('full_name, year_of_study, academic_track, settlement, origin_city, marital_status, has_children, partner_user_id, bio, interests')
         .eq('id', user.id)
         .single(),
       userClient
@@ -240,7 +268,36 @@ serve(async (req) => {
         .eq('status', 'pending')
         .order('due_date', { ascending: true, nullsFirst: false })
         .limit(10),
+      userClient
+        .from('user_search_history')
+        .select('query, context')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      userClient
+        .from('user_circle_members')
+        .select('circle:user_circles(name)')
+        .eq('user_id', user.id),
     ]);
+
+    // Resolve partner first name (only if linked)
+    let partnerName: string | null = null;
+    if (profileRes.data?.partner_user_id) {
+      const { data: partnerData } = await userClient
+        .from('users')
+        .select('full_name')
+        .eq('id', profileRes.data.partner_user_id)
+        .single();
+      partnerName = partnerData?.full_name?.split(' ')[0] || null;
+    }
+
+    // Recent chat topics the user has asked about
+    const { data: recentChatsData } = await userClient
+      .from('chat_interactions')
+      .select('question')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(5);
 
     const tagIds = (tagsRes.data || []).map((t: any) => t.tag_id);
     const tagNames = (tagsRes.data || [])
@@ -269,13 +326,25 @@ serve(async (req) => {
     }
 
     // --- 6. Build system prompt ---
+    const extras = {
+      searchHistory: searchRes.data || [],
+      circles: (circlesRes.data || [])
+        .map((c: any) => c.circle?.name)
+        .filter(Boolean) as string[],
+      recentChatTopics: (recentChatsData || [])
+        .map((c: any) => c.question?.slice(0, 80))
+        .filter(Boolean) as string[],
+      partnerName,
+    };
+
     const systemPrompt = buildSystemPrompt(
       profileRes.data,
       tagNames,
       activityRes.data || [],
       pendingRes.data || [],
       bridges,
-      !!is_new_session
+      !!is_new_session,
+      extras
     );
 
     // --- 7. Call Claude API ---
