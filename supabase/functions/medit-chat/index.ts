@@ -151,7 +151,8 @@ ${recentTopicsList}
 5. שמור על טון חם, ישיר, כמו חבר קרוב — לא פורמלי
 6. דבר עברית בלבד
 7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים
-8. אם המשתמש מבקש לעדכן פרט בפרופיל (כגון מצב משפחתי, ביוגרפיה, טלפון וכד') — קרא ל-save_profile_field מיד${newSessionInstruction}${profileCompletionSection}`;
+8. אם המשתמש מבקש לעדכן פרט בפרופיל (כגון מצב משפחתי, ביוגרפיה, טלפון וכד') — קרא ל-save_profile_field מיד
+9. לשמירת פרטי ילד — קרא ל-save_child פעם אחת לכל ילד בנפרד (שם אם ידוע, מגדר, גיל). אסור לשמור כמה ילדים בקריאה אחת${newSessionInstruction}${profileCompletionSection}`;
 }
 
 // Simple tag extraction: find known tag names that appear in the user's question
@@ -170,11 +171,7 @@ const PROFILE_FIELDS_ORDER = [
   },
   {
     field: 'has_children',
-    question: 'יש לך ילדים?',
-  },
-  {
-    field: 'children_ages',
-    question: 'כמה שנות גיל יש לילדים? (מופרד בפסיקים, לדוגמה: 3, 7)',
+    question: 'יש לך ילדים? אם כן — ספר לי על כל ילד (שם, מגדר, גיל)',
   },
   {
     field: 'bio',
@@ -195,15 +192,26 @@ type ProfileField = typeof PROFILE_FIELDS_ORDER[number]['field'];
 // Returns ordered list of fields that are null/empty in the profile
 function computeMissingFields(profile: any): { field: ProfileField; question: string }[] {
   return PROFILE_FIELDS_ORDER.filter(({ field }) => {
-    if (field === 'children_ages') {
-      return profile?.has_children === true &&
-        (!profile?.children_ages || profile.children_ages.length === 0);
-    }
     const val = profile?.[field];
     return val === null || val === undefined || val === '' ||
       (Array.isArray(val) && val.length === 0);
   });
 }
+
+// Claude tool for saving a single child's details
+const SAVE_CHILD_TOOL = {
+  name: 'save_child',
+  description: 'Save details of one child. Call once per child separately.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      name: { type: 'string', description: 'Child\'s name (optional)' },
+      gender: { type: 'string', enum: ['male', 'female'], description: 'male for boy, female for girl' },
+      age: { type: 'number', description: 'Child\'s age in whole years' },
+    },
+    required: ['age'],
+  },
+};
 
 // Claude tool definition for saving a single profile field
 const PROFILE_COMPLETION_TOOL = {
@@ -447,7 +455,7 @@ serve(async (req) => {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
-        tools: [PROFILE_COMPLETION_TOOL],
+        tools: [PROFILE_COMPLETION_TOOL, SAVE_CHILD_TOOL],
         messages,
       };
 
@@ -521,7 +529,30 @@ serve(async (req) => {
       for (const toolUseBlock of toolUseBlocks) {
         let toolResult = 'saved';
 
-        if (toolUseBlock.name === 'save_profile_field') {
+        if (toolUseBlock.name === 'save_child') {
+          const { name, gender, age } = toolUseBlock.input || {};
+          const validAge = typeof age === 'number' ? age : parseInt(String(age), 10);
+          if (!isNaN(validAge) && validAge >= 0 && validAge < 100) {
+            const genderMap: Record<string, string> = {
+              male: 'male', female: 'female', זכר: 'male', נקבה: 'female', בן: 'male', בת: 'female',
+            };
+            const { error: childError } = await adminClient.from('user_children').insert({
+              user_id: user.id,
+              name: typeof name === 'string' && name.trim() ? name.trim() : null,
+              gender: genderMap[String(gender || '')] || null,
+              age: validAge,
+            });
+            if (childError) {
+              console.error('Failed to save child:', childError);
+              toolResult = 'error saving child';
+            } else {
+              // Ensure has_children is true
+              await adminClient.from('users').update({ has_children: true }).eq('id', user.id);
+            }
+          } else {
+            toolResult = 'invalid age — skipped';
+          }
+        } else if (toolUseBlock.name === 'save_profile_field') {
           const { field, value } = toolUseBlock.input || {};
           const sanitizer = ALLOWED_SAVE_FIELDS[field];
 

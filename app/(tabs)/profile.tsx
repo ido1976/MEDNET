@@ -21,7 +21,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { useBridgeStore } from '../../src/stores/bridgeStore';
 import { useFriendStore } from '../../src/stores/friendStore';
 import { getInitials, YEAR_LABELS, INTEREST_OPTIONS } from '../../src/lib/helpers';
-import type { User, Friendship } from '../../src/types/database';
+import type { User, Friendship, UserChild } from '../../src/types/database';
 import { supabase } from '../../src/lib/supabase';
 
 const LANGUAGE_OPTIONS = [
@@ -63,6 +63,9 @@ export default function ProfileScreen() {
     user?.children_ages?.join(', ') || ''
   );
 
+  // Children from user_children table
+  const [children, setChildren] = useState<UserChild[]>([]);
+
   // Couple sync
   const [partnerSearch, setPartnerSearch] = useState('');
   const [partnerUser, setPartnerUser] = useState<User | null>(null);
@@ -84,9 +87,19 @@ export default function ProfileScreen() {
       fetchFriends(user.id);
       fetchRequests(user.id);
       fetchPartnerData(user.id);
+      fetchChildren(user.id);
     }
     fetchAllTags();
   }, [user?.id]);
+
+  const fetchChildren = async (userId: string) => {
+    const { data } = await supabase
+      .from('user_children')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    if (data) setChildren(data as UserChild[]);
+  };
 
   const fetchPartnerData = async (userId: string) => {
     if (user?.partner_user_id) {
@@ -575,17 +588,13 @@ export default function ProfileScreen() {
                   style={[styles.yearChip, hasChildren && styles.yearChipActive]}
                   onPress={() => setHasChildren(true)}
                 >
-                  <Text style={[styles.yearChipText, hasChildren && styles.yearChipTextActive]}>
-                    יש ילדים
-                  </Text>
+                  <Text style={[styles.yearChipText, hasChildren && styles.yearChipTextActive]}>יש ילדים</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.yearChip, !hasChildren && styles.yearChipActive]}
                   onPress={() => setHasChildren(false)}
                 >
-                  <Text style={[styles.yearChipText, !hasChildren && styles.yearChipTextActive]}>
-                    אין ילדים
-                  </Text>
+                  <Text style={[styles.yearChipText, !hasChildren && styles.yearChipTextActive]}>אין ילדים</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -593,27 +602,29 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {(editing ? hasChildren : user?.has_children) && (
+          {user?.has_children && (
             <>
               <View style={styles.divider} />
               <View style={styles.field}>
-                <Text style={styles.fieldLabel}>גילאי ילדים (מופרדים בפסיק)</Text>
-                {editing ? (
-                  <TextInput
-                    style={styles.fieldInput}
-                    value={childrenAges}
-                    onChangeText={setChildrenAges}
-                    textAlign="right"
-                    keyboardType="numeric"
-                    placeholder="לדוגמה: 3, 7, 12"
-                    placeholderTextColor={COLORS.grayLight}
-                  />
-                ) : (
-                  <Text style={styles.fieldValue}>
-                    {user?.children_ages?.length ? user.children_ages.join(', ') : '-'}
-                  </Text>
-                )}
+                <Text style={styles.fieldLabel}>מספר ילדים</Text>
+                <Text style={styles.fieldValue}>{children.length || '—'}</Text>
               </View>
+              {children.length > 0 && children.map((child) => (
+                <React.Fragment key={child.id}>
+                  <View style={styles.divider} />
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>
+                      {child.name || (child.gender === 'female' ? 'בת' : child.gender === 'male' ? 'בן' : 'ילד')}
+                    </Text>
+                    <Text style={styles.fieldValue}>
+                      {[
+                        child.gender === 'female' ? 'בת' : child.gender === 'male' ? 'בן' : null,
+                        child.age != null ? `גיל ${child.age}` : null,
+                      ].filter(Boolean).join(' | ')}
+                    </Text>
+                  </View>
+                </React.Fragment>
+              ))}
             </>
           )}
         </View>
