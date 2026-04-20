@@ -55,7 +55,24 @@
       "Bash(git fetch:*)",
       "Bash(gh api:*)",
       "WebFetch(domain:github.com)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(git -C \"C:\\\\Users\\\\idoro\\\\Desktop\\\\MEDNET\" check-ignore -q .worktrees)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr create --title 'feat: CHATMED Phase 2A - personalized context + conversation persistence' --body ':*)",
+      "Bash(where gh:*)",
+      "Bash(npx supabase *)",
+      "Bash(git stash *)",
+      "Bash(git push *)",
+      "Bash(curl -s -X POST \"https://mpkbdnqwshkskbhnftwm.supabase.co/rest/v1/rpc/exec_sql\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDY2NzMsImV4cCI6MjA5MTI4MjY3M30.ggTTxaxrYS48PrEr6KGJLFi6AHrU8L_r3egC4_-Qklg\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDY2NzMsImV4cCI6MjA5MTI4MjY3M30.ggTTxaxrYS48PrEr6KGJLFi6AHrU8L_r3egC4_-Qklg\" -H \"Content-Type: application/json\" -d \"{\\\\\"query\\\\\": \\\\\"SELECT column_name FROM information_schema.columns WHERE table_name = 'apartments' ORDER BY ordinal_position;\\\\\"}\")",
+      "Bash(curl -s -X POST \"https://mpkbdnqwshkskbhnftwm.supabase.co/rest/v1/rpc/exec_sql\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs\" -H \"Content-Type: application/json\" -d \"{\\\\\"query\\\\\": \\\\\"SELECT column_name FROM information_schema.columns WHERE table_name = 'apartments' ORDER BY ordinal_position;\\\\\"}\")",
+      "Bash(curl -s -X POST https://mpkbdnqwshkskbhnftwm.supabase.co/storage/v1/bucket -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs' -H 'Content-Type: application/json' -d '{\"id\": \"apartment-images\", \"name\": \"apartment-images\", \"public\": true}')",
+      "Bash(curl -s -X POST https://mpkbdnqwshkskbhnftwm.supabase.co/storage/v1/bucket/apartment-images/policy -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcwNjY3MywiZXhwIjoyMDkxMjgyNjczfQ.ZTTNk8qAi2NR5Kmh9l5zYVnlMFuE_jVepNliO2ovOrs' -H 'Content-Type: application/json' -d '{\"name\": \"Authenticated users can upload\", \"definition\": \"\\(\\(bucket_id = '\\\\''apartment-images'\\\\''::text\\) AND \\(auth.role\\(\\) = '\\\\''authenticated'\\\\''::text\\)\\)\", \"action\": \"INSERT\"}')",
+      "Bash(curl -s 'https://mpkbdnqwshkskbhnftwm.supabase.co/rest/v1/apartments?select=id,contact_phone,images,floor,is_furnished,has_balcony,has_parking,pets_allowed&limit=1' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wa2JkbnF3c2hrc2tiaG5mdHdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDY2NzMsImV4cCI6MjA5MTI4MjY3M30.ggTTxaxrYS48PrEr6KGJLFi6AHrU8L_r3egC4_-Qklg')",
+      "Bash(Get-Content \"C:\\\\Users\\\\idoro\\\\Desktop\\\\MEDNET\\\\supabase\\\\functions\\\\medit-chat\\\\index.ts\")",
+      "Bash(Measure-Object -Line)",
+      "Bash(Select-Object -ExpandProperty Lines)",
+      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\idoro\\\\Desktop\\\\MEDNET\\\\supabase\\\\functions\\\\medit-chat\\\\index.ts\"\\).Count)"
     ]
   }
 }

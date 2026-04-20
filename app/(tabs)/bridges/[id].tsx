@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import ScreenWrapper from '../../../src/components/ScreenWrapper';
@@ -88,9 +88,7 @@ export default function BridgeDetailScreen() {
 
   const isCreator = user?.id === currentBridge?.created_by;
 
-  useEffect(() => {
-    loadData();
-  }, [id]);
+  useFocusEffect(useCallback(() => { loadData(); }, [id]));
 
   const loadData = async () => {
     if (!id) return;
@@ -104,18 +102,12 @@ export default function BridgeDetailScreen() {
       loadUserRating(),
       fetchTips(id),
       fetchAdditions(id),
+      fetchPendingAdditions(id), // RLS filters to creator-only; safe to always call
       fetchAllTags(),
       fetchFiles(id),
     ]);
-    // Fetch pending additions if user is creator (will be checked after bridge loads)
     setLoading(false);
   };
-
-  useEffect(() => {
-    if (isCreator && id) {
-      fetchPendingAdditions(id);
-    }
-  }, [isCreator, id]);
 
   const loadSubBridges = async () => {
     if (!id) return;

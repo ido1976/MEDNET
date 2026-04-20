@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,9 @@ import {
   Alert,
   Image,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ScreenWrapper from '../../../src/components/ScreenWrapper';
@@ -20,12 +21,15 @@ import EmptyState from '../../../src/components/EmptyState';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../../src/constants/theme';
 import { useSecondhandStore } from '../../../src/stores/secondhandStore';
 import { useAuthStore } from '../../../src/stores/authStore';
+import { uploadImage } from '../../../src/lib/uploadImage';
+import { supabase } from '../../../src/lib/supabase';
 import type { SecondhandListing } from '../../../src/types/database';
 
 const CATEGORIES = [
   { id: 'all', label: 'הכל' },
   { id: 'product', label: 'מוצרים' },
   { id: 'service', label: 'שירותים' },
+  { id: 'giveaway', label: 'למסירה 🎁' },
   { id: 'other', label: 'אחר' },
 ];
 
@@ -36,27 +40,39 @@ export default function SecondhandScreen() {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Create form
+  // Create form state
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newPrice, setNewPrice] = useState('');
-  const [newContact, setNewContact] = useState('');
-  const [newCategory, setNewCategory] = useState<'product' | 'service' | 'other'>('product');
+  const [newPhone, setNewPhone] = useState('');
+  const [newCategory, setNewCategory] = useState<'product' | 'service' | 'other' | 'giveaway'>('product');
   const [newImages, setNewImages] = useState<string[]>([]);
 
-  useEffect(() => {
-    fetchListings(selectedCategory === 'all' ? undefined : selectedCategory);
-  }, [selectedCategory]);
+  // Refresh on every screen focus (like apartments)
+  useFocusEffect(
+    useCallback(() => {
+      fetchListings(selectedCategory === 'all' ? undefined : selectedCategory);
+    }, [selectedCategory])
+  );
 
-  const pickImage = async () => {
+  // Auto-fill phone from profile when modal opens
+  useEffect(() => {
+    if (showCreate) {
+      setNewPhone(user?.phone || '');
+    }
+  }, [showCreate]);
+
+  const pickImages = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsMultipleSelection: true,
       quality: 0.7,
     });
     if (!result.canceled) {
-      setNewImages((prev) => [...prev, result.assets[0].uri]);
+      const uris = result.assets.map((a) => a.uri);
+      setNewImages((prev) => [...prev, ...uris].slice(0, 6)); // max 6 images
     }
   };
 
@@ -68,8 +84,8 @@ export default function SecondhandScreen() {
     setNewTitle('');
     setNewDesc('');
     setNewPrice('');
-    setNewContact('');
-    setNewCategory('product');
+    setNewPhone('');
+    setNewCategory('product' as const);
     setNewImages([]);
   };
 
@@ -83,24 +99,55 @@ export default function SecondhandScreen() {
       return;
     }
 
-    const result = await createListing({
-      title: newTitle.trim(),
-      description: newDesc.trim(),
-      category: newCategory,
-      price: newPrice ? parseFloat(newPrice) : null,
-      images: newImages,
-      contact_info: newContact.trim(),
-      created_by: session.user.id,
-    });
+    setIsSubmitting(true);
+    try {
+      // Upload images to Storage before saving
+      const uploadedUrls: string[] = [];
+      for (const uri of newImages) {
+        try {
+          const url = await uploadImage(uri, 'secondhand-images');
+          uploadedUrls.push(url);
+        } catch (err) {
+          console.warn('Image upload failed, skipping:', err);
+        }
+      }
 
-    if (result.error) {
-      Alert.alert('שגיאה', result.error);
-      return;
+      const result = await createListing({
+        title: newTitle.trim(),
+        description: newDesc.trim(),
+        category: newCategory,
+        price: newCategory === 'giveaway' ? null : (newPrice ? parseFloat(newPrice) : null),
+        images: uploadedUrls,
+        contact_info: newPhone.trim() || '',
+        contact_phone: newPhone.trim() || undefined,
+        created_by: session.user.id,
+        status: 'active',
+      });
+
+      if (result.error) {
+        Alert.alert('שגיאה', result.error);
+        return;
+      }
+
+      // Fire-and-forget: schedule CHATMED relevance check in 30 days
+      if (result.id) {
+        supabase
+          .rpc('create_secondhand_check_action', {
+            p_listing_id: result.id,
+            p_title: newTitle.trim(),
+          })
+          .then(({ error }) => {
+            if (error) console.warn('create_secondhand_check_action failed:', error);
+          });
+      }
+
+      setShowCreate(false);
+      resetForm();
+    } catch (err: any) {
+      Alert.alert('שגיאה', err.message || 'שגיאה לא צפויה');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setShowCreate(false);
-    resetForm();
-    fetchListings(selectedCategory === 'all' ? undefined : selectedCategory);
   };
 
   const filteredListings = listings.filter((l) => {
@@ -112,6 +159,7 @@ export default function SecondhandScreen() {
     switch (cat) {
       case 'product': return 'מוצר';
       case 'service': return 'שירות';
+      case 'giveaway': return 'למסירה 🎁';
       default: return 'אחר';
     }
   };
@@ -122,32 +170,56 @@ export default function SecondhandScreen() {
       activeOpacity={0.85}
       onPress={() => router.push(`/(tabs)/secondhand/${item.id}`)}
     >
-      {item.images?.[0] && (
-        <Image source={{ uri: item.images[0] }} style={styles.cardImage} />
-      )}
-      <View style={styles.cardBody}>
-        <View style={styles.cardTitleRow}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryBadgeText}>{getCategoryLabel(item.category)}</Text>
+      <View style={styles.cardRow}>
+        {/* Info — takes remaining space */}
+        <View style={styles.cardContent}>
+          {/* Title + category badge */}
+          <View style={styles.cardTitleRow}>
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryBadgeText}>{getCategoryLabel(item.category)}</Text>
+            </View>
+            <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+          </View>
+
+          {/* Description */}
+          {item.description ? (
+            <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
+          ) : null}
+
+          {/* Price */}
+          {item.category === 'giveaway' ? (
+            <Text style={styles.giveawayText}>ללא תשלום 🎁</Text>
+          ) : item.price != null ? (
+            <Text style={styles.priceText}>₪{item.price.toLocaleString()}</Text>
+          ) : (
+            <Text style={styles.noPriceText}>ללא מחיר</Text>
+          )}
+
+          {/* Footer: seller + status badge */}
+          <View style={styles.cardFooter}>
+            {(item as any).creator?.full_name ? (
+              <View style={styles.sellerRow}>
+                <Ionicons name="person-circle-outline" size={13} color={COLORS.gray} />
+                <Text style={styles.sellerText} numberOfLines={1}>
+                  {(item as any).creator.full_name}
+                </Text>
+              </View>
+            ) : <View />}
+            {item.status === 'sold' && (
+              <View style={styles.soldBadge}>
+                <Text style={styles.soldBadgeText}>נמכר 🔴</Text>
+              </View>
+            )}
           </View>
         </View>
-        {item.description ? (
-          <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
-        ) : null}
-        <View style={styles.cardFooter}>
-          {item.price != null && (
-            <Text style={styles.priceText}>₪{item.price}</Text>
-          )}
-          {(item as any).creator?.full_name && (
-            <View style={styles.publisherRow}>
-              <Ionicons name="person-circle-outline" size={14} color={COLORS.gray} />
-              <Text style={styles.publisherText}>{(item as any).creator.full_name}</Text>
-            </View>
-          )}
-          {item.status === 'sold' && (
-            <View style={styles.soldBadge}>
-              <Text style={styles.soldBadgeText}>נמכר</Text>
+
+        {/* Image — fixed 110×110 on the right */}
+        <View style={styles.cardImageContainer}>
+          {item.images?.[0] ? (
+            <Image source={{ uri: item.images[0] }} style={styles.cardImage} />
+          ) : (
+            <View style={styles.cardImagePlaceholder}>
+              <Ionicons name="bag-handle-outline" size={32} color={COLORS.grayLight} />
             </View>
           )}
         </View>
@@ -178,6 +250,22 @@ export default function SecondhandScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+              {/* Category — first so user sets context */}
+              <Text style={styles.modalLabel}>קטגוריה:</Text>
+              <View style={styles.categoryRow}>
+                {(['product', 'service', 'giveaway', 'other'] as const).map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.catChip, newCategory === cat && styles.catChipActive]}
+                    onPress={() => setNewCategory(cat)}
+                  >
+                    <Text style={[styles.catChipText, newCategory === cat && styles.catChipTextActive]}>
+                      {getCategoryLabel(cat)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <TextInput
                 style={styles.modalInput}
                 placeholder="כותרת *"
@@ -195,42 +283,41 @@ export default function SecondhandScreen() {
                 multiline
                 placeholderTextColor={COLORS.grayLight}
               />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="מחיר (₪)"
-                value={newPrice}
-                onChangeText={setNewPrice}
-                textAlign="right"
-                keyboardType="numeric"
-                placeholderTextColor={COLORS.grayLight}
-              />
-              <TextInput
-                style={styles.modalInput}
-                placeholder="פרטי קשר (טלפון/אימייל)"
-                value={newContact}
-                onChangeText={setNewContact}
-                textAlign="right"
-                placeholderTextColor={COLORS.grayLight}
-              />
+              {newCategory === 'giveaway' ? (
+                <View style={styles.freeLabelRow}>
+                  <Ionicons name="gift-outline" size={16} color={COLORS.accent} />
+                  <Text style={styles.freeLabelText}>ללא תשלום — למסירה</Text>
+                </View>
+              ) : (
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="מחיר ₪ (אופציונלי)"
+                  value={newPrice}
+                  onChangeText={setNewPrice}
+                  textAlign="right"
+                  keyboardType="numeric"
+                  placeholderTextColor={COLORS.grayLight}
+                />
+              )}
 
-              {/* Category */}
-              <Text style={styles.modalLabel}>קטגוריה:</Text>
-              <View style={styles.categoryRow}>
-                {(['product', 'service', 'other'] as const).map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={[styles.catChip, newCategory === cat && styles.catChipActive]}
-                    onPress={() => setNewCategory(cat)}
-                  >
-                    <Text style={[styles.catChipText, newCategory === cat && styles.catChipTextActive]}>
-                      {getCategoryLabel(cat)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              {/* Phone — auto-filled from profile */}
+              <View>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="טלפון ליצירת קשר"
+                  value={newPhone}
+                  onChangeText={setNewPhone}
+                  textAlign="right"
+                  keyboardType="phone-pad"
+                  placeholderTextColor={COLORS.grayLight}
+                />
+                {user?.phone ? (
+                  <Text style={styles.phoneHint}>מולא אוטומטית מהפרופיל שלך</Text>
+                ) : null}
               </View>
 
               {/* Images */}
-              <Text style={styles.modalLabel}>תמונות:</Text>
+              <Text style={styles.modalLabel}>תמונות (עד 6):</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imagesRow}>
                 {newImages.map((uri, idx) => (
                   <View key={idx} style={styles.imageThumbContainer}>
@@ -240,14 +327,24 @@ export default function SecondhandScreen() {
                     </TouchableOpacity>
                   </View>
                 ))}
-                <TouchableOpacity style={styles.addImageBtn} onPress={pickImage}>
-                  <Ionicons name="camera-outline" size={28} color={COLORS.gray} />
-                  <Text style={styles.addImageText}>הוסף</Text>
-                </TouchableOpacity>
+                {newImages.length < 6 && (
+                  <TouchableOpacity style={styles.addImageBtn} onPress={pickImages}>
+                    <Ionicons name="camera-outline" size={28} color={COLORS.gray} />
+                    <Text style={styles.addImageText}>הוסף</Text>
+                  </TouchableOpacity>
+                )}
               </ScrollView>
 
-              <TouchableOpacity style={styles.createBtn} onPress={handleCreate}>
-                <Text style={styles.createBtnText}>פרסם</Text>
+              <TouchableOpacity
+                style={[styles.createBtn, isSubmitting && { opacity: 0.7 }]}
+                onPress={handleCreate}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={COLORS.white} />
+                ) : (
+                  <Text style={styles.createBtnText}>פרסם</Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -293,7 +390,9 @@ export default function SecondhandScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
-          <EmptyState icon="bag-handle-outline" title="אין פרסומים" subtitle="פרסם משהו חדש!" />
+          loading
+            ? <ActivityIndicator style={{ marginTop: 40 }} color={COLORS.primary} />
+            : <EmptyState icon="bag-handle-outline" title="אין פרסומים" subtitle="פרסם משהו חדש!" />
         }
       />
     </ScreenWrapper>
@@ -360,7 +459,10 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: SPACING.lg,
     paddingBottom: 100,
+    paddingTop: SPACING.sm,
   },
+
+  // Horizontal card layout
   card: {
     backgroundColor: COLORS.cardBg,
     borderRadius: RADIUS.lg,
@@ -368,34 +470,38 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...SHADOWS.card,
   },
-  cardImage: {
-    width: '100%',
-    height: 160,
-  },
-  cardBody: {
+  cardRow: {
+    flexDirection: 'row',
     padding: SPACING.md,
+    gap: SPACING.md,
+    alignItems: 'flex-start',
+  },
+  cardContent: {
+    flex: 1,
+    alignItems: 'flex-end',
+    gap: 4,
   },
   cardTitleRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: SPACING.sm,
+    gap: SPACING.xs,
+    flexWrap: 'wrap',
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: COLORS.primaryDark,
-    flex: 1,
     textAlign: 'right',
+    flex: 1,
   },
   categoryBadge: {
     backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: RADIUS.sm,
   },
   categoryBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     color: COLORS.primary,
   },
@@ -403,47 +509,142 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.gray,
     textAlign: 'right',
-    marginTop: 4,
     lineHeight: 18,
+  },
+  priceText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.accent,
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  noPriceText: {
+    fontSize: 13,
+    color: COLORS.grayLight,
+    textAlign: 'right',
+    fontStyle: 'italic',
+  },
+  giveawayText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.accent,
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  freeLabelRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accent + '15',
+    padding: SPACING.sm,
+    borderRadius: RADIUS.md,
+  },
+  freeLabelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.accent,
   },
   cardFooter: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: SPACING.sm,
+    width: '100%',
+    marginTop: 4,
   },
-  priceText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  publisherRow: {
+  sellerRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
+    flex: 1,
   },
-  publisherText: {
-    fontSize: 12,
+  sellerText: {
+    fontSize: 11,
     color: COLORS.gray,
   },
   soldBadge: {
-    backgroundColor: COLORS.red + '20',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    backgroundColor: COLORS.red + '15',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: RADIUS.sm,
   },
   soldBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: COLORS.red,
   },
+
+  // Image on the right
+  cardImageContainer: {
+    width: 110,
+    height: 110,
+    borderRadius: RADIUS.md,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  cardImage: {
+    width: 110,
+    height: 110,
+    resizeMode: 'cover',
+  },
+  cardImagePlaceholder: {
+    width: 110,
+    height: 110,
+    backgroundColor: COLORS.grayLight + '30',
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: COLORS.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: SPACING.lg, paddingBottom: 40, maxHeight: '85%' },
-  modalHeader: { flexDirection: 'row-reverse' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, marginBottom: SPACING.sm },
-  modalTitle: { fontSize: 20, fontWeight: '700' as const, color: COLORS.primaryDark },
-  modalInput: { backgroundColor: COLORS.cardBg, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.grayLight, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, fontSize: 15, color: COLORS.black, writingDirection: 'rtl' as const },
-  modalLabel: { fontSize: 14, fontWeight: '600' as const, color: COLORS.primaryDark, textAlign: 'right' as const },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.cream,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: SPACING.lg,
+    paddingBottom: 40,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row-reverse' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: SPACING.sm,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: COLORS.primaryDark,
+  },
+  modalInput: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.grayLight,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: 15,
+    color: COLORS.black,
+    writingDirection: 'rtl' as const,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: COLORS.primaryDark,
+    textAlign: 'right' as const,
+  },
+  phoneHint: {
+    fontSize: 11,
+    color: COLORS.gray,
+    textAlign: 'right',
+    marginTop: 3,
+    marginRight: 4,
+    fontStyle: 'italic',
+  },
   categoryRow: {
     flexDirection: 'row-reverse',
     gap: SPACING.sm,
@@ -502,6 +703,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.gray,
   },
-  createBtn: { backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.xl, alignItems: 'center' as const, marginTop: SPACING.sm, ...SHADOWS.button },
-  createBtnText: { color: COLORS.white, fontSize: 16, fontWeight: '700' as const },
+  createBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    borderRadius: RADIUS.xl,
+    alignItems: 'center' as const,
+    marginTop: SPACING.sm,
+    ...SHADOWS.button,
+  },
+  createBtnText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
 });

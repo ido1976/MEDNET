@@ -151,6 +151,7 @@ export interface Event {
   date: string;
   location?: string;
   category?: string;
+  categories?: string[];
   link?: string;
   image_url?: string | null;
   created_by: string;
@@ -177,6 +178,14 @@ export interface Apartment {
   description: string;
   contact_user_id: string;
   contact_user?: User;
+  // Extended fields
+  contact_phone?: string;
+  images?: string[];
+  floor?: number;
+  is_furnished?: boolean;
+  has_balcony?: boolean;
+  has_parking?: boolean;
+  pets_allowed?: boolean;
 }
 
 export interface Ride {
@@ -246,10 +255,11 @@ export interface SecondhandListing {
   id: string;
   title: string;
   description: string;
-  category: 'product' | 'service' | 'other';
+  category: 'product' | 'service' | 'other' | 'giveaway';
   price: number | null;
   images: string[];
   contact_info: string;
+  contact_phone?: string;
   created_by: string;
   status: 'active' | 'sold' | 'closed';
   created_at: string;
@@ -325,7 +335,7 @@ export interface NotificationPreference {
 export interface PendingAction {
   id: string;
   user_id: string;
-  action_type: 'form' | 'survey' | 'profile_update' | 'rsvp' | 'document';
+  action_type: 'form' | 'survey' | 'profile_update' | 'rsvp' | 'document' | 'apartment_check' | 'secondhand_check';
   title: string;
   description: string | null;
   url: string | null;

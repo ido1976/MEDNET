@@ -36,7 +36,9 @@ function buildSystemPrompt(
     partnerName: string | null;
     children: { id: string; name: string | null; gender: string | null; age: number }[];
   },
-  missingFields: { field: string; question: string }[]
+  missingFields: { field: string; question: string }[],
+  userApartments: { id: string; address: string; available_from: string }[],
+  userSecondhand: { id: string; title: string; price: number | null; status: string; created_at: string }[]
 ): string {
   const firstName = profile?.full_name?.split(' ')[0] || 'חבר/ה';
 
@@ -59,7 +61,14 @@ function buildSystemPrompt(
         const due = p.due_date
           ? ` (עד ${new Date(p.due_date).toLocaleDateString('he-IL')})`
           : '';
-        return `- ${p.title}${due}`;
+        // Include IDs for tools that need them
+        let extra = '';
+        if (p.action_type === 'apartment_check') {
+          extra = ` [pending_action_id:${p.id}, apartment_id:${p.metadata?.apartment_id}, address:${p.metadata?.address}, available_from:${p.metadata?.available_from}]`;
+        } else if (p.action_type === 'secondhand_check') {
+          extra = ` [pending_action_id:${p.id}, listing_id:${p.metadata?.listing_id}, title:${p.metadata?.title}]`;
+        }
+        return `- [${p.action_type}] ${p.title}${due}${extra}`;
       }).join('\n')
     : 'אין פעולות ממתינות';
 
@@ -95,8 +104,36 @@ function buildSystemPrompt(
       }).join('\n')
     : null;
 
+  const hasApartments = userApartments.length > 0;
+  // Only prompt about secondhand listings that are at least 7 days old —
+  // freshly-posted items shouldn't trigger "is this still for sale?" questions.
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const oldSecondhand = userSecondhand.filter((s) => {
+    const created = new Date(s.created_at).getTime();
+    return Number.isFinite(created) && (now - created) >= SEVEN_DAYS_MS;
+  });
+  const hasSecondhand = oldSecondhand.length > 0;
+  const hasPendingApartmentCheck = pendingActions.some((p: any) => p.action_type === 'apartment_check');
+  const hasPendingSecondhandCheck = pendingActions.some((p: any) => p.action_type === 'secondhand_check');
+  const hasAnyListing = hasApartments || hasSecondhand;
+
+  let proactiveInstructions = '';
+  if (hasApartments) {
+    proactiveInstructions += `\nיש לו מודעת דירה ברשימת "מודעות דירה שפרסמת" — בצע בסדר:\n1. קרא ל-get_apartment_analytics עם ה-apartment_id הראשון\n2. הצג נתוני חשיפה בצורה חמה${hasPendingApartmentCheck ? '\n3. שאל אם המודעה עדיין רלוונטית' : ''}`;
+  }
+  if (hasSecondhand) {
+    if (hasApartments) {
+      proactiveInstructions += `\nבנוסף יש לו מודעת יד שנייה (פורסמה לפני 7+ ימים) — אחרי הדירה שאל אם רוצה לשמוע על החשיפה שלה, ואז שאל אם הפריט עדיין למכירה (אם לא — קרא ל-delete_secondhand_listing לאחר אישור).`;
+    } else {
+      proactiveInstructions += `\nיש לו מודעת יד שנייה שפורסמה לפני 7+ ימים — בצע בסדר:\n1. קרא ל-get_secondhand_analytics עם ה-listing_id הראשון\n2. הצג נתוני חשיפה בצורה חמה\n3. שאל אם הפריט עדיין למכירה (אם לא — קרא ל-delete_secondhand_listing לאחר אישור)`;
+    }
+  }
+
   const newSessionInstruction = isNewSession
-    ? '\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי ואמור לו דבר אחד חשוב שממתין לו (pending action בעדיפות ראשונה, אחרת גשר חדש רלוונטי). אם אין כלום — שאל מה הוא צריך היום.'
+    ? hasAnyListing
+      ? `\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי.${proactiveInstructions}\nאחרי הכל — בדוק אם יש pending actions אחרים לציין.`
+      : '\n\n=== הוראה לפתיחת שיחה ===\nזוהי שיחה חדשה. פנה למשתמש בשמו הפרטי ואמור לו דבר אחד חשוב שממתין לו (pending action בעדיפות ראשונה, אחרת גשר חדש רלוונטי). אם אין כלום ויש שדות פרופיל חסרים — שאל על השדה הראשון מהרשימה באופן חם ואישי. אם הכול מלא — שאל מה הוא צריך היום.'
     : '';
 
   // Profile completion section
@@ -152,6 +189,8 @@ ${searchList}
 === נושאים שנשאלו לאחרונה בצ'אט ===
 ${recentTopicsList}
 ${childrenList ? `\n=== ילדים קיימים (השתמש ב-ID לעדכון) ===\n${childrenList}` : ''}
+${userApartments.length > 0 ? `\n=== מודעות דירה שפרסמת (השתמש ב-ID לאנליטיקות) ===\n${userApartments.map((a: { id: string; address: string; available_from: string }) => `- ID: ${a.id} | ${a.address} | כניסה: ${a.available_from}`).join('\n')}` : ''}
+${userSecondhand.length > 0 ? `\n=== מודעות יד שנייה שפרסמת (השתמש ב-ID לאנליטיקות) ===\n${userSecondhand.map((s) => `- ID: ${s.id} | ${s.title}${s.price != null ? ` | ₪${s.price}` : ''} | ${s.status === 'active' ? 'פעיל' : 'נמכר'}`).join('\n')}` : ''}
 === כללי התנהגות ===
 1. פנה תמיד בשמו הפרטי
 2. בפתיחת שיחה חדשה — ציין מיד דבר אחד חשוב שממתין לו
@@ -162,7 +201,11 @@ ${childrenList ? `\n=== ילדים קיימים (השתמש ב-ID לעדכון) 
 7. אם שואלים רפואה קלינית — הפנה לגשרים הרלוונטיים
 8. אם המשתמש מבקש לעדכן פרט בפרופיל (כגון מצב משפחתי, ביוגרפיה, טלפון וכד') — קרא ל-save_profile_field מיד
 9. לשמירת ילד חדש — קרא ל-save_child פעם אחת לכל ילד בנפרד (שם אם ידוע, מגדר, גיל). אסור לשמור כמה ילדים בקריאה אחת
-10. לתיקון פרטי ילד קיים (גיל, שם, מגדר) — קרא ל-update_child עם ה-ID מרשימת "ילדים קיימים". לא save_child${newSessionInstruction}${profileCompletionSection}`;
+10. לתיקון פרטי ילד קיים (גיל, שם, מגדר) — קרא ל-update_child עם ה-ID מרשימת "ילדים קיימים". לא save_child
+11. כשיש pending_action מסוג apartment_check: שאל בטון חברותי "ראיתי שפרסמת דירה ב-[address], תאריך הכניסה [available_from] מתקרב — האם המודעה עדיין פעילה?". • אם כן/עדיין רלוונטי → קרא ל-snooze_apartment_check והצג את ההודעה שהכלי מחזיר כמות שהיא. • אם לא/תמחק/כבר לא רלוונטי → בקש אישור קצר ואז קרא ל-delete_apartment. • אם המשתמש אמר "אני אודיע" — הסבר שתחזור אחרי תאריך הכניסה. השתמש ב-pending_action_id ו-apartment_id מה-metadata שברשימת הממתינים.
+12. כשמשתמש שואל על חשיפה / כמה ראו / סטטיסטיקות של מודעת דירה — קרא ל-get_apartment_analytics. אם יש דירה אחת ברשימת "מודעות דירה שפרסמת" — השתמש בה מיד. אם יש כמה — שאל על איזו דירה מדובר. הצג את הנתונים בצורה חמה וידידותית.
+13. כשיש pending_action מסוג secondhand_check: שאל "ראיתי שפרסמת '[title]' לפני 30 יום — האם הפריט עדיין למכירה?". • אם כן/עדיין רלוונטי → קרא ל-snooze_secondhand_check. • אם נמכר/לא רלוונטי → בקש אישור קצר ואז קרא ל-delete_secondhand_listing. השתמש ב-pending_action_id ו-listing_id מרשימת הממתינים.
+14. כשמשתמש שואל על חשיפה / סטטיסטיקות של מודעת יד שנייה — קרא ל-get_secondhand_analytics. אם יש מודעה אחת ברשימת "מודעות יד שנייה שפרסמת" — השתמש בה מיד. הצג בצורה חמה וידידותית.${newSessionInstruction}${profileCompletionSection}`;
 }
 
 // Simple tag extraction: find known tag names that appear in the user's question
@@ -236,6 +279,86 @@ const SAVE_CHILD_TOOL = {
       age: { type: 'number', description: 'Child\'s age in whole years' },
     },
     required: ['age'],
+  },
+};
+
+// Tool: delete an apartment listing on behalf of the user
+const DELETE_APARTMENT_TOOL = {
+  name: 'delete_apartment',
+  description: 'מוחק מודעת דירה של המשתמש לאחר אישורו המפורש. קרא לכלי זה רק אחרי שהמשתמש אמר בצורה ברורה שהוא רוצה למחוק את המודעה.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      apartment_id: { type: 'string', description: 'ה-UUID של מודעת הדירה למחיקה' },
+      pending_action_id: { type: 'string', description: 'ה-UUID של ה-pending_action לסגירה אחרי המחיקה' },
+    },
+    required: ['apartment_id', 'pending_action_id'],
+  },
+};
+
+// Tool: snooze apartment relevance check until after available_from date
+const SNOOZE_APARTMENT_TOOL = {
+  name: 'snooze_apartment_check',
+  description: 'דוחה את בדיקת הרלוונטיות של מודעת הדירה. אם תאריך הכניסה עדיין לא הגיע — ידחה עד יום אחרי תאריך הכניסה. אם כבר עבר — ידחה 7 ימים.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      pending_action_id: { type: 'string', description: 'ה-UUID של ה-pending_action לדחייה' },
+    },
+    required: ['pending_action_id'],
+  },
+};
+
+// Tool: fetch analytics for an apartment listing
+const GET_APARTMENT_ANALYTICS_TOOL = {
+  name: 'get_apartment_analytics',
+  description: 'מביא נתוני חשיפה של מודעת דירה: צפיות, גלישת תמונות, לחיצות טלפון ווואטסאפ. קרא לכלי זה כשבעל המודעה שואל על החשיפה / כמה ראו / סטטיסטיקות.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      apartment_id: { type: 'string', description: 'ה-UUID של מודעת הדירה' },
+    },
+    required: ['apartment_id'],
+  },
+};
+
+// Tool: delete a secondhand listing on behalf of the user
+const DELETE_SECONDHAND_TOOL = {
+  name: 'delete_secondhand_listing',
+  description: 'מוחק מודעת יד שנייה של המשתמש לאחר אישורו המפורש. קרא לכלי זה רק אחרי שהמשתמש אמר בצורה ברורה שהוא רוצה למחוק.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      listing_id: { type: 'string', description: 'ה-UUID של מודעת יד שנייה למחיקה' },
+      pending_action_id: { type: 'string', description: 'ה-UUID של ה-pending_action לסגירה אחרי המחיקה' },
+    },
+    required: ['listing_id', 'pending_action_id'],
+  },
+};
+
+// Tool: snooze secondhand relevance check by 30 days
+const SNOOZE_SECONDHAND_TOOL = {
+  name: 'snooze_secondhand_check',
+  description: 'דוחה את בדיקת הרלוונטיות של מודעת יד שנייה ב-30 יום.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      pending_action_id: { type: 'string', description: 'ה-UUID של ה-pending_action לדחייה' },
+    },
+    required: ['pending_action_id'],
+  },
+};
+
+// Tool: fetch analytics for a secondhand listing
+const GET_SECONDHAND_ANALYTICS_TOOL = {
+  name: 'get_secondhand_analytics',
+  description: 'מביא נתוני חשיפה של מודעת יד שנייה: צפיות, גלישת תמונות, לחיצות טלפון ווואטסאפ.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      listing_id: { type: 'string', description: 'ה-UUID של מודעת יד שנייה' },
+    },
+    required: ['listing_id'],
   },
 };
 
@@ -390,9 +513,10 @@ serve(async (req) => {
         .limit(5),
       userClient
         .from('pending_actions')
-        .select('title, due_date')
+        .select('id, action_type, title, due_date, metadata')
         .eq('user_id', user.id)
         .eq('status', 'pending')
+        .or('due_date.is.null,due_date.lte.' + new Date().toISOString())
         .order('due_date', { ascending: true, nullsFirst: false })
         .limit(10),
       userClient
@@ -455,6 +579,25 @@ serve(async (req) => {
         .slice(0, 10);
     }
 
+    // Fetch apartments published by this user (for analytics context)
+    const { data: userApartmentsData } = await userClient
+      .from('apartments')
+      .select('id, address, available_from')
+      .eq('contact_user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    const userApartments: { id: string; address: string; available_from: string }[] = userApartmentsData || [];
+
+    // Fetch secondhand listings published by this user
+    const { data: userSecondhandData } = await userClient
+      .from('secondhand_listings')
+      .select('id, title, price, status, created_at')
+      .eq('created_by', user.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    const userSecondhand: { id: string; title: string; price: number | null; status: string; created_at: string }[] = userSecondhandData || [];
+
     // --- 6. Build system prompt ---
     const extras = {
       searchHistory: searchRes.data || [],
@@ -478,7 +621,9 @@ serve(async (req) => {
       bridges,
       !!is_new_session,
       extras,
-      missingFields
+      missingFields,
+      userApartments,
+      userSecondhand
     );
 
     // --- 7. Call Claude API (with tool_use support) ---
@@ -487,7 +632,7 @@ serve(async (req) => {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
-        tools: [PROFILE_COMPLETION_TOOL, SAVE_CHILD_TOOL, UPDATE_CHILD_TOOL],
+        tools: [PROFILE_COMPLETION_TOOL, SAVE_CHILD_TOOL, UPDATE_CHILD_TOOL, DELETE_APARTMENT_TOOL, SNOOZE_APARTMENT_TOOL, GET_APARTMENT_ANALYTICS_TOOL, DELETE_SECONDHAND_TOOL, SNOOZE_SECONDHAND_TOOL, GET_SECONDHAND_ANALYTICS_TOOL],
         messages,
       };
 
@@ -640,6 +785,154 @@ serve(async (req) => {
             }
           } else {
             toolResult = 'unknown field — skipped';
+          }
+        }
+
+        if (toolUseBlock.name === 'delete_apartment') {
+          const { apartment_id, pending_action_id } = toolUseBlock.input || {};
+          if (!apartment_id || !pending_action_id) {
+            toolResult = 'שגיאה: חסרים פרטי מזהה';
+          } else {
+            // Verify ownership before delete
+            const { data: apt } = await adminClient
+              .from('apartments')
+              .select('contact_user_id')
+              .eq('id', apartment_id)
+              .single();
+            if (!apt || apt.contact_user_id !== user.id) {
+              toolResult = 'שגיאה: אין הרשאה למחוק מודעה זו';
+            } else {
+              await adminClient.from('apartments').delete().eq('id', apartment_id);
+              await adminClient.from('pending_actions')
+                .update({ status: 'completed', completed_at: new Date().toISOString() })
+                .eq('id', pending_action_id);
+              toolResult = 'המודעה נמחקה בהצלחה ✓';
+            }
+          }
+        } else if (toolUseBlock.name === 'snooze_apartment_check') {
+          const { pending_action_id } = toolUseBlock.input || {};
+          if (!pending_action_id) {
+            toolResult = 'שגיאה: חסר מזהה pending_action';
+          } else {
+            // Read available_from from metadata to decide next check date
+            const { data: pa } = await adminClient
+              .from('pending_actions')
+              .select('metadata')
+              .eq('id', pending_action_id)
+              .single();
+
+            const availableFrom = pa?.metadata?.available_from
+              ? new Date(pa.metadata.available_from as string)
+              : null;
+
+            const now = new Date();
+            let nextDue: Date;
+            let message: string;
+
+            if (availableFrom && availableFrom > now) {
+              // Entry date still in the future — ask again the day after
+              nextDue = new Date(availableFrom);
+              nextDue.setDate(nextDue.getDate() + 1);
+              const heDate = nextDue.toLocaleDateString('he-IL');
+              message = `בסדר! אבקש שתעדכן אותי כשהמודעה כבר לא רלוונטית. אחזור אליך לאחר תאריך הכניסה (${heDate}) לבדוק ✓`;
+            } else {
+              // Entry date already passed — check again in 7 days
+              nextDue = new Date();
+              nextDue.setDate(now.getDate() + 7);
+              message = 'בסדר, אחזור אליך שוב בעוד שבוע ✓';
+            }
+
+            await adminClient.from('pending_actions')
+              .update({ due_date: nextDue.toISOString() })
+              .eq('id', pending_action_id)
+              .eq('user_id', user.id);
+
+            toolResult = message;
+          }
+        } else if (toolUseBlock.name === 'get_apartment_analytics') {
+          const { apartment_id } = toolUseBlock.input || {};
+          if (!apartment_id) {
+            toolResult = 'שגיאה: חסר מזהה מודעה';
+          } else {
+            const { data: apt } = await adminClient
+              .from('apartments')
+              .select('contact_user_id, address')
+              .eq('id', apartment_id)
+              .single();
+            if (!apt || apt.contact_user_id !== user.id) {
+              toolResult = 'שגיאה: אין גישה לנתוני מודעה זו';
+            } else {
+              const { data: acts } = await adminClient
+                .from('user_activity')
+                .select('activity_type, metadata')
+                .eq('target_type', 'apartment')
+                .eq('target_id', apartment_id)
+                .neq('user_id', user.id); // exclude owner's own views
+              const views    = acts?.filter((a: any) => a.activity_type === 'view').length ?? 0;
+              const images   = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'image_scroll').length ?? 0;
+              const phones   = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'phone_click').length ?? 0;
+              const whatsapp = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'whatsapp_click').length ?? 0;
+              toolResult = `נתוני חשיפה — ${apt.address}:\n👁 צפיות: ${views}\n🖼 גלישת תמונות: ${images}\n📞 לחיצות טלפון: ${phones}\n💬 שליחות וואטסאפ: ${whatsapp}`;
+            }
+          }
+        } else if (toolUseBlock.name === 'delete_secondhand_listing') {
+          const { listing_id, pending_action_id } = toolUseBlock.input || {};
+          if (!listing_id || !pending_action_id) {
+            toolResult = 'שגיאה: חסרים פרטי מזהה';
+          } else {
+            const { data: listing } = await adminClient
+              .from('secondhand_listings')
+              .select('created_by, title')
+              .eq('id', listing_id)
+              .single();
+            if (!listing || listing.created_by !== user.id) {
+              toolResult = 'שגיאה: אין הרשאה למחוק מודעה זו';
+            } else {
+              await adminClient.from('secondhand_listings').delete().eq('id', listing_id);
+              await adminClient.from('pending_actions')
+                .update({ status: 'completed', completed_at: new Date().toISOString() })
+                .eq('id', pending_action_id);
+              toolResult = `המודעה "${listing.title}" נמחקה בהצלחה ✓`;
+            }
+          }
+        } else if (toolUseBlock.name === 'snooze_secondhand_check') {
+          const { pending_action_id } = toolUseBlock.input || {};
+          if (!pending_action_id) {
+            toolResult = 'שגיאה: חסר מזהה pending_action';
+          } else {
+            const nextDue = new Date();
+            nextDue.setDate(nextDue.getDate() + 30);
+            await adminClient.from('pending_actions')
+              .update({ due_date: nextDue.toISOString() })
+              .eq('id', pending_action_id)
+              .eq('user_id', user.id);
+            toolResult = 'בסדר, אחזור אליך בעוד 30 יום לבדוק ✓';
+          }
+        } else if (toolUseBlock.name === 'get_secondhand_analytics') {
+          const { listing_id } = toolUseBlock.input || {};
+          if (!listing_id) {
+            toolResult = 'שגיאה: חסר מזהה מודעה';
+          } else {
+            const { data: listing } = await adminClient
+              .from('secondhand_listings')
+              .select('created_by, title')
+              .eq('id', listing_id)
+              .single();
+            if (!listing || listing.created_by !== user.id) {
+              toolResult = 'שגיאה: אין גישה לנתוני מודעה זו';
+            } else {
+              const { data: acts } = await adminClient
+                .from('user_activity')
+                .select('activity_type, metadata')
+                .eq('target_type', 'secondhand')
+                .eq('target_id', listing_id)
+                .neq('user_id', user.id);
+              const views    = acts?.filter((a: any) => a.activity_type === 'view').length ?? 0;
+              const images   = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'image_scroll').length ?? 0;
+              const phones   = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'phone_click').length ?? 0;
+              const whatsapp = acts?.filter((a: any) => a.activity_type === 'react' && a.metadata?.action === 'whatsapp_click').length ?? 0;
+              toolResult = `נתוני חשיפה — ${listing.title}:\n👁 צפיות: ${views}\n🖼 גלישת תמונות: ${images}\n📞 לחיצות טלפון: ${phones}\n💬 שליחות וואטסאפ: ${whatsapp}`;
+            }
           }
         }
 

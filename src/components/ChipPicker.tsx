@@ -5,21 +5,52 @@ import { COLORS, SPACING, RADIUS } from '../constants/theme';
 
 interface ChipPickerProps {
   items: string[];
-  selected: string;
-  onSelect: (item: string) => void;
-  onAddNew: (item: string) => void;
-  placeholder?: string;
+  // Single-select (original API — required for backward compat)
+  selected?: string;
+  onSelect?: (item: string) => void;
+  // Multi-select (new)
+  multiSelect?: boolean;
+  selectedMulti?: string[];
+  onSelectMulti?: (items: string[]) => void;
+  // Optional
   label?: string;
+  onAddNew?: (item: string) => void;
+  placeholder?: string;
 }
 
-export default function ChipPicker({ items, selected, onSelect, onAddNew, placeholder = 'הוסף...', label }: ChipPickerProps) {
+export default function ChipPicker({
+  items,
+  selected = '',
+  onSelect,
+  multiSelect = false,
+  selectedMulti = [],
+  onSelectMulti,
+  onAddNew,
+  placeholder = 'הוסף...',
+  label,
+}: ChipPickerProps) {
   const [showInput, setShowInput] = useState(false);
   const [customValue, setCustomValue] = useState('');
 
+  const isActive = (item: string) =>
+    multiSelect ? selectedMulti.includes(item) : selected === item;
+
+  const handlePress = (item: string) => {
+    if (multiSelect && onSelectMulti) {
+      if (selectedMulti.includes(item)) {
+        onSelectMulti(selectedMulti.filter((i) => i !== item));
+      } else {
+        onSelectMulti([...selectedMulti, item]);
+      }
+    } else if (onSelect) {
+      onSelect(item);
+    }
+  };
+
   const handleAdd = () => {
     if (!customValue.trim()) return;
-    onAddNew(customValue.trim());
-    onSelect(customValue.trim());
+    if (onAddNew) onAddNew(customValue.trim());
+    handlePress(customValue.trim());
     setCustomValue('');
     setShowInput(false);
   };
@@ -31,15 +62,17 @@ export default function ChipPicker({ items, selected, onSelect, onAddNew, placeh
         {items.map((item) => (
           <TouchableOpacity
             key={item}
-            style={[styles.chip, selected === item && styles.chipActive]}
-            onPress={() => onSelect(item)}
+            style={[styles.chip, isActive(item) && styles.chipActive]}
+            onPress={() => handlePress(item)}
           >
-            <Text style={[styles.chipText, selected === item && styles.chipTextActive]}>{item}</Text>
+            <Text style={[styles.chipText, isActive(item) && styles.chipTextActive]}>{item}</Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity style={styles.addChip} onPress={() => setShowInput(true)}>
-          <Ionicons name="add" size={18} color={COLORS.primary} />
-        </TouchableOpacity>
+        {onAddNew && (
+          <TouchableOpacity style={styles.addChip} onPress={() => setShowInput(true)}>
+            <Ionicons name="add" size={18} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
       </ScrollView>
       {showInput && (
         <View style={styles.inputRow}>

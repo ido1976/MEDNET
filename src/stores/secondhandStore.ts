@@ -40,7 +40,7 @@ export const useSecondhandStore = create<SecondhandState>((set) => ({
   fetchListing: async (id) => {
     const { data } = await supabase
       .from('secondhand_listings')
-      .select('*, creator:users(full_name, avatar_url, email)')
+      .select('*, creator:users(full_name, avatar_url, email, phone)')
       .eq('id', id)
       .single();
 

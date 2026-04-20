@@ -28,7 +28,7 @@ import { supabase } from '../../../src/lib/supabase';
 
 export default function DiscussionsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ bridgeId?: string; eventId?: string; openCreate?: string }>();
+  const params = useLocalSearchParams<{ bridgeId?: string; eventId?: string; openCreate?: string; eventTags?: string }>();
   const { discussions, fetchDiscussions, createDiscussion, loading } = useDiscussionStore();
   const { bridges, fetchBridges, fetchSubBridges } = useBridgeStore();
   const { subscribedTags } = useAuthStore();
@@ -79,9 +79,14 @@ export default function DiscussionsScreen() {
     if (params.openCreate === 'true') {
       setSelectedBridgeId(params.bridgeId || null);
       setSelectedEventId(params.eventId || null);
+      // Pre-fill tag from event categories if provided
+      if (params.eventTags) {
+        const firstTag = decodeURIComponent(params.eventTags).split(',')[0]?.trim();
+        if (firstTag) setNewTag(firstTag);
+      }
       setShowCreate(true);
     }
-  }, [params.openCreate]);
+  }, [params.openCreate, params.eventTags, params.bridgeId, params.eventId]);
 
   // Load events for selected bridge
   useEffect(() => {
@@ -235,7 +240,12 @@ export default function DiscussionsScreen() {
             <TextInput style={styles.modalInput} placeholder="כותרת הדיון" value={newTitle} onChangeText={setNewTitle} textAlign="right" placeholderTextColor={COLORS.grayLight} />
             <ChipPicker
               label="תיוג:"
-              items={discussionCategories}
+              items={[...new Set([
+                ...discussionCategories,
+                ...(params.eventTags
+                  ? decodeURIComponent(params.eventTags).split(',').map(t => t.trim()).filter(Boolean)
+                  : []),
+              ])]}
               selected={newTag}
               onSelect={setNewTag}
               onAddNew={(cat) => addCategory('discussions', cat)}
